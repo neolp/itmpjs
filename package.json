@@ -1,0 +1,23 @@
+{
+  "name": "itmpjs",
+  "version": "1.0.0",
+  "description": "itmp js implementation",
+  "main": "index.js",
+  "scripts": {
+    "test": "test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neolp/itmpjs.git"
+  },
+  "keywords": [
+    "itmp",
+    "iot"
+  ],
+  "author": "Alexey Tsigulin",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/neolp/itmpjs/issues"
+  },
+  "homepage": "https://github.com/neolp/itmpjs#readme"
+}
