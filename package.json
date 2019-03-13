@@ -1,5 +1,5 @@
 {
-  "name": "itmpjs",
+  "name": "itmp",
   "version": "1.0.0",
   "description": "itmp js implementation",
   "main": "index.js",
@@ -16,6 +16,12 @@
   ],
   "author": "Alexey Tsigulin",
   "license": "MIT",
+  "dependencies": {
+    "cbor-sync": "^1.0.3",
+    "express": "^4.16.4",
+    "express-ws": "^4.0.0",
+    "serialport": "^7.1.4"
+  },
   "bugs": {
     "url": "https://github.com/neolp/itmpjs/issues"
   },
