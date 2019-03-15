@@ -1,15 +1,14 @@
 const EventEmitter = require('events')
 const url = require('url')
-const express = require('express')
-const expressws = require('express-ws')
 const itmplink = require('./itmplink')
 const cbor = require('cbor-sync')
 
 class ITMPWsServerLink extends itmplink
 {
-  constructor(name, ws)
+  constructor(name, itmp, ws)
   {
     super(name)
+    this.itmp = itmp
     this.ws = ws
     this.msgqueue = []
     this.ready = true
@@ -53,7 +52,7 @@ class ITMPWsServerLink extends itmplink
       this.interval = undefined
       console.log('closed ', name, code, reason)
       this.ready = false
-      itmp.deleteConnection(this.linkname)
+      this.itmp.deleteConnection(this.linkname)
     })
     this.interval = setInterval(() => {
       if (this.isAlive === false) {
@@ -103,30 +102,41 @@ class ITMPWsServerLink extends itmplink
 
 class ITMPWsServer extends EventEmitter
 {
-  constructor(itmp, name, ws)
+  constructor(itmp, name, opts)
   {
     super()
+    this.itmp=itmp
+    let path
 
-    const wsurl = url.parse(name)
-    const port = wsurl.port || 80
-    const that = this
 
-    this.app = express()
-    expressws(this.app)
-    this.app.ws(wsurl.pathname, (ws, req) => {
+    if (opts && opts.expressapp) {
+      this.app = opts.expressapp
+      path = opts.url || '/'
+    } else {
+      const wsurl = url.parse(name)
+      const port = wsurl.port || 80
+      path = wsurl.pathname
+      const that = this
+      const express = require('express')
+      const expressws = require('express-ws')
+      this.app = express()
+      expressws(this.app)
+      // start server!
+      this.server = this.app.listen(port, () => {
+        that.emit('connect',that)
+        console.log(`App listening on address '${this.server.address().address}' and port ${this.server.address().port}`)
+      })
+    }
+
+    this.app.ws(path, (ws, req) => {
       let link
       if (req.connection.remoteFamily === 'IPv6') {
-        link = new ITMPWsServerLink(`ws:[${req.connection.remoteAddress}]:${req.connection.remotePort}`, ws)
+        link = new ITMPWsServerLink(`ws:[${req.connection.remoteAddress}]:${req.connection.remotePort}`, this.itmp, ws)
       } else {
-        link = new ITMPWsServerLink(`ws:${req.connection.remoteAddress}:${req.connection.remotePort}`, ws)
+        link = new ITMPWsServerLink(`ws:${req.connection.remoteAddress}:${req.connection.remotePort}`, this.itmp, ws)
       }
       itmp.addLink(link)
       //console.log(`connected ws:[${req.connection.remoteAddress}]:${req.connection.remotePort}`)
-    })
-    // start server!
-    this.server = this.app.listen(port, () => {
-      that.emit('connect',that)
-      console.log(`App listening on address '${this.server.address().address}' and port ${this.server.address().port}`)
     })
   }
 

@@ -47,6 +47,7 @@ class itmpClient extends EventEmitter {
         if (val.unsubscribe) {
           val.unsubscribe(uri, null, val)
         }
+        this.emit(this.$unsubscribe, uri, val)
       })
       link.subscriptions.clear()
       this.emit(this.$disconnect)
@@ -71,6 +72,7 @@ class itmpClient extends EventEmitter {
       if (val.unsubscribe) {
         val.unsubscribe(uri, null, val)
       }
+      this.emit(this.$unsubscribe, uri, val)
     })
     link.subscriptions.clear()
     link.removeAllListeners('connect')
@@ -190,9 +192,14 @@ class itmpClient extends EventEmitter {
       //console.log(`fault subs${JSON.stringify(payload)}`)
       //this.answer(addr, [5, id, 404, 'no such uri'])
       //} else {
-      this.answer(addr, [17, id])
-      link.subscriptions.set(originaluri, s)
-      this.emit(this.$subscribe, originaluri, addr)
+      if (typeof originaluri === 'string' && originaluri.length > 0) {
+        link.subscriptions.set(originaluri, s)
+        this.answer(addr, [17, id])
+        this.emit(this.$subscribe, originaluri, addr)
+      } else {
+        this.answer(addr, [5, id, 400, 'wrong topic'])
+      }
+
       //}
     } else {
       this.answer(addr, [5, id, 500, 'already subscribed'])
@@ -492,10 +499,10 @@ class itmpClient extends EventEmitter {
   }
 */
   // publish('speed',[12,45])
-  publish (topic, msg, force) {
+  publish (topic, msg) {
     this.links.forEach((link, key, map) => {
       const to = link.subscriptions.get(topic)
-      if (to || force) {
+      if (to) {
         const id = this.msgid++
         link.send(to ? to.subaddr : undefined, [13, id, topic, msg])
       }
@@ -719,6 +726,12 @@ please rewrite this
         if (url.startsWith('ws://')) {
           let Srv = require('./itmplinkserverws')
           let srv = new Srv(this, url, opts)
+          this.addListener(srv)
+        }
+      } else {
+        if (index.startsWith('ws') || url.scheme.startsWith('ws')) {
+          let Srv = require('./itmplinkserverws')
+          let srv = new Srv(this, undefined, Object.assign({}, opts, url))
           this.addListener(srv)
         }
       } 
