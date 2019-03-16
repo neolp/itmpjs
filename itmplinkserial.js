@@ -4,7 +4,7 @@ const crc8 = require('./crc8')
 const cbor = require('cbor-sync')
 //const cbor = require('cbor')
 //const URL = require('url')
-var URL = require('url').URL;
+var URL = require('url').URL
 
 function tonumberifpossible(val){
   const num = Number(val)
@@ -14,9 +14,9 @@ function tonumberifpossible(val){
 class ITMPSerialLink extends itmplink {
   constructor (name, url, props) {
     super(name)
-    const portprops = {}
+    const portprops = Object.assign({}, props)
     const parsedurl = new URL(url)
-    parsedurl.searchParams.forEach((value, name, searchParams) => {
+    parsedurl.searchParams.forEach((value, name) => {
       portprops[name] = tonumberifpossible(value)
     })
     const portname = parsedurl.host + parsedurl.pathname

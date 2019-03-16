@@ -9,7 +9,8 @@ class itmpClient extends EventEmitter {
   constructor () {
     super()
     this.$connect = Symbol('connect')
-    this.$disconnect = Symbol('disconnect')
+    this.$connected = Symbol('connected')
+    this.$disconnected = Symbol('disconnected')
     this.$subscribe = Symbol('subscribe')
     this.$unsubscribe = Symbol('unsubscribe')
     this.$message = Symbol('message')
@@ -39,18 +40,18 @@ class itmpClient extends EventEmitter {
     this.links.set(linkname, link)
     link.on('connect', async ()=>{
       this.transactionLink(link, undefined, [0,0,''], 30000).then(()=>{
-        this.emit(this.$connect, linkname)
+        this.emit(this.$connected, linkname)
       })
     })
     link.on('disconnect', ()=>{
-      link.subscriptions.forEach((val, uri, map) => {
+      link.subscriptions.forEach((val, uri) => {
         if (val.unsubscribe) {
           val.unsubscribe(uri, null, val)
         }
         this.emit(this.$unsubscribe, uri, val)
       })
       link.subscriptions.clear()
-      this.emit(this.$disconnect)
+      this.emit(this.$disconnected)
     })
     link.on('message', (link, subaddr, msg)=>{
       //      console.log('income message',JSON.stringify(msg))
@@ -68,7 +69,7 @@ class itmpClient extends EventEmitter {
       this.model.disconnect(link)
     }
     // remove incoming subscriptions
-    link.subscriptions.forEach((val, uri, map) => {
+    link.subscriptions.forEach((val, uri) => {
       if (val.unsubscribe) {
         val.unsubscribe(uri, null, val)
       }
@@ -84,11 +85,17 @@ class itmpClient extends EventEmitter {
   processConnect (link, addr, id, payload) {
     let [uri, opts] = payload
     if (opts === undefined || typeof opts !== 'object') opts = {}
-    console.log('got connect restore subscriptions')
-    this._resubscribe(link, undefined).then(()=>{
-      console.log('reconnected')
-      this.answer(addr, [1, id, 'ok'])
-    })
+    let event = {uri,opts,block:false}
+    this.off.emit(this.$connect, event)
+    if (event.block) {
+      this.answer(addr, [5, id, event.blockcode?event.blockcode:403, event.blockreason?event.blockreason:'forbidden'])
+    } else {
+      console.log('got connect restore subscriptions')
+      this._resubscribe(link, undefined).then(()=>{
+        console.log('reconnected')
+        this.answer(addr, [1, id, 'ok'])
+      })
+    }
   }
 
   processConnected (link, addr, key, payload) {
