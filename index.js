@@ -1,5 +1,44 @@
 const EventEmitter = require('events')
 
+var defaultConnectOptions = {
+  keepalive: 60,
+  protocolId: 'ws',
+  reconnectPeriod: 1000,
+  connectTimeout: 30 * 1000,
+  resubscribe: true
+}
+
+// itmp error codes and its descriptions
+var errors = {
+  304: 'Not Modified',
+  306: 'No Event',// (if CALL to event topic but no event this time)
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  405: 'Method Not Allowed',
+  406: 'Not Acceptable',
+  408: 'Request Timeout',
+  409: 'Already subscribed',//'Conflict',
+  410: 'Gone',
+  413: 'Request Entity Too Large',
+  414: 'Request-URI Too Large',
+  418: 'I\'m a teapot',
+  419: 'Format error',
+  420: 'Type error',
+  429: 'Too Many Requests',
+  432: 'No matching subscribers',
+  433: 'No subscription existed',
+  500: 'Internal Server Error',
+  501: 'Not Implemented',
+  503: 'Server unavailable',
+  505: 'Unacceptable protocol version',
+  507: 'Insufficient Storage',
+  509: 'Bandwidth Limit Exceeded',
+  512: 'Protocol Error',
+  521: 'Server Is Down'
+}
+
 const knownschemas = {
   ws:'./itmplinkws',
   serial:'./itmplinkserial'
@@ -8,47 +47,49 @@ const knownschemas = {
 class itmpClient extends EventEmitter {
   constructor () {
     super()
-    this.$connect = Symbol('connect')
-    this.$connected = Symbol('connected')
-    this.$disconnected = Symbol('disconnected')
-    this.$subscribe = Symbol('subscribe')
-    this.$unsubscribe = Symbol('unsubscribe')
-    this.$message = Symbol('message')
+    this.$connect = Symbol('connect') // event fired when client send message connect with connect parameters (event = {uri,opts,block:false})
+    this.$connected = Symbol('connected') // event fired wthen client fully connected (and resubscription was finished)
+    this.$disconnected = Symbol('disconnected') // event fired when client was disconnected
+    this.$subscribe = Symbol('subscribe') //  event fired when client subscribe for topic
+    this.$unsubscribe = Symbol('unsubscribe') //  event fired when client unsubscribe for topic
+    this.$message = Symbol('message')  //  event fired when client send an event
     this.links = new Map() // handle all links
     this.listeners = new Map() // handle all listeners for incoming connection
     
     this.urls = new Map() // handle all internal urls
     this.msgid = 0 // msg number incremental for transction sequencing
-    this.transactions = new Map()
-    this.localsubscriptions = new Map()
-    this.localsubscriptionsid = 1
+    this.transactions = new Map() // handle unfinished transactions
+    this.localsubscriptions = new Map() // handle subscription from local subscribers (programmaticaly subscribed)
+    this.localsubscriptionsid = 1 // index of subscription for local subscribers (programmaticaly subscribed)
+    this.errors = errors // handle error codes and their descriptions
 
-    this.on('newListener', (eventName, listener) => { // when subscribe new listener
+    this.on('newListener', (eventName, listener) => { // when subscribe new listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName!=='newListener' && eventName!=='removeListener' && this.listenerCount(eventName) === 0) {
         this._subscribe(eventName)
       }
     }) 
-    this.on('removeListener', (eventName, listener) => { // when unsubscribe the listener
+    this.on('removeListener', (eventName, listener) => { // when unsubscribe the listener (it is from 'events' interface)
       if (typeof eventName === 'string'  && eventName!=='newListener' && eventName!=='removeListener' &&  this.listenerCount(eventName) === 0) {
         this._unsubscribe(eventName)
       }
     })
   }
 
+  // add new link (new connection)
   addLink (link) {
     const linkname = link.linkname
     this.links.set(linkname, link)
-    link.on('connect', async ()=>{
+    link.on('connect', async ()=>{ // then link connected (become active) send initial CONNECT message and then got answer make link connected
       this.transactionLink(link, undefined, [0,0,''], 30000).then(()=>{
         this.emit(this.$connected, linkname)
       })
     })
-    link.on('disconnect', ()=>{
+    link.on('disconnect', ()=>{ // then link disconnected unsubscribe all topics from thet link
       link.subscriptions.forEach((val, uri) => {
         if (val.unsubscribe) {
           val.unsubscribe(uri, null, val)
         }
-        this.emit(this.$unsubscribe, uri, val)
+        this.emit(this.$unsubscribe, uri, val.addr)
       })
       link.subscriptions.clear()
       this.emit(this.$disconnected)
@@ -185,12 +226,12 @@ class itmpClient extends EventEmitter {
     const [originaluri, opts] = payload
     let uri
     if (link.connected) {
-      console.log('linked subscribe', addr, ' for ', originaluri)
+      //console.log('linked subscribe', addr, ' for ', originaluri)
       uri = `area${link.connected.link}/${originaluri}`
     } else {
       uri = originaluri
     }
-    console.log('subscribe', addr, ' for ', uri)
+    //console.log('subscribe', addr, ' for ', uri)
 
     if (!link.subscriptions.has(originaluri)) {
       const s = { link, addr/*, emit:this.emitEvent.bind(this)*/ }
@@ -201,20 +242,24 @@ class itmpClient extends EventEmitter {
       //} else {
       if (typeof originaluri === 'string' && originaluri.length > 0) {
         link.subscriptions.set(originaluri, s)
-        this.answer(addr, [17, id])
-        this.emit(this.$subscribe, originaluri, addr)
+        try {
+          this.emit(this.$subscribe, originaluri, addr)
+          this.answer(addr, [17, id])
+        } catch (err){
+          this.answer(addr, [5, id, 500, err.message])  
+        }
       } else {
         this.answer(addr, [5, id, 400, 'wrong topic'])
       }
 
       //}
     } else {
-      this.answer(addr, [5, id, 500, 'already subscribed'])
+      this.answer(addr, [5, id, 409, 'already subscribed'])
     }
   }
   processUnsubscribe (link, addr, id, payload) {
     const [uri, opts] = payload
-    console.log('unsubscribe', addr, ' at ', uri)
+    //console.log('unsubscribe', addr, ' at ', uri)
     const s = link.subscriptions.get(uri)
     if (s !== undefined) {
       let ret
@@ -698,6 +743,7 @@ please rewrite this
   }
 
   connect (urls, opts){
+    opts = Object.assign({},defaultConnectOptions,opts)
     if (typeof urls === 'string') urls = [urls]
     for (let index in urls) {
       let url = urls[index]
