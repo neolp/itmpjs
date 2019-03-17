@@ -82,6 +82,9 @@ class itmpClient extends EventEmitter {
     link.on('connect', async ()=>{ // then link connected (become active) send initial CONNECT message and then got answer make link connected
       this.transactionLink(link, undefined, [0,0,''], 30000).then(()=>{
         this.emit(this.$connected, linkname)
+      }).catch( (err) => {
+        //TODO we should do something else
+        this.emit(this.$connected, linkname)
       })
     })
     link.on('disconnect', ()=>{ // then link disconnected unsubscribe all topics from thet link
