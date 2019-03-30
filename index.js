@@ -106,6 +106,9 @@ class itmpClient extends EventEmitter {
     const listenername = listener.listenername
     this.listeners.set(listenername, listener)
   }
+  setGeneralCall(call){
+    this.gencall = call
+  }
 
   deleteConnection (name) {
     let link = this.links.get(name)
@@ -189,6 +192,18 @@ class itmpClient extends EventEmitter {
       } else {
         this.answer(addr, [5, id, 501, 'no call for this node'])
       }
+    }  else if (this.gencall){
+      this.gencall(uri, args, opts).
+        then((ret)=> {
+          this.answer(addr, [9, id, ret])
+        }).
+        catch((err)=>{
+          if (err.code) {
+            this.answer(addr, [5, id, err.code, err.message])
+          } else {
+            this.answer(addr, [5, id, 500, 'internal error'])
+          }
+        })
     } else {
       this.answer(addr, [5, id, 404, 'no such call'])
     }
@@ -432,7 +447,7 @@ class itmpClient extends EventEmitter {
     // }, 2000, key);
     // that.transactions.set(key, {'done':done, 'err':err, 'timeout':timerId, 'msg':msg} );
   }
-/*
+  /*
   getLink (addr) {
     const [linkname, subaddr, uri] = addr.split('/', 3)
     let link
@@ -529,7 +544,7 @@ class itmpClient extends EventEmitter {
     })
     //    })
   }
-/*
+  /*
   // TODO
   // rewrite this to use sub paths
   emitEvent (addr, topic, msg) {
