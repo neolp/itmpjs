@@ -3,19 +3,19 @@ const cbor = require('cbor-sync')
 const WebSocket = require('ws')
 
 class ITMPWsLink extends itmplink {
-  constructor (name, url, props) {
+  constructor(name, url, props) {
     super(name)
-    if (props===undefined) props={}
+    if (props === undefined) props = {}
     this.url = url
-    this.binary = props.binary!==undefined ? props.binary : true
+    this.binary = props.binary !== undefined ? props.binary : true
     this.msgqueue = []
     this.ws = null
   }
 
-  connect(){
+  connect() {
     var that = this
     that.ready = false
-    if (this.ws){
+    if (this.ws) {
       this.ws.close()
     }
     try {
@@ -45,13 +45,13 @@ class ITMPWsLink extends itmplink {
     this.ws.on('close', function (code, reason) {
       //console.log('ITMPWsLink closed ', code, reason)
       that.ready = false
-      that.emit('disconnect',code, reason)
+      that.emit('disconnect', code, reason)
       //if (this.settings.autoReconnect && this.reconnectCount < this.settings.reconnectMaxCount) {
       setTimeout(that.connect.bind(that), 3000) //that.settings.reconnectTimeout
       // }
     })
   }
-  send (addr, binmsg) {
+  send(addr, binmsg) {
     if (this.ws && this.ready) {
       try {
         if (this.binary) {
@@ -59,7 +59,7 @@ class ITMPWsLink extends itmplink {
         } else {
           this.ws.send(JSON.stringify(binmsg))
         }
-      }catch(err){
+      } catch (err) {
         this.msgqueue.push([addr, binmsg])
       }
     } else {
@@ -67,9 +67,10 @@ class ITMPWsLink extends itmplink {
     }
   }
 
-  queueSize () {
+  queueSize() {
     return this.msgqueue.length
   }
+  stop() { }
 }
 
 module.exports = ITMPWsLink

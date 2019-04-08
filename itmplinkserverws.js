@@ -3,10 +3,8 @@ const url = require('url')
 const itmplink = require('./itmplink')
 const cbor = require('cbor-sync')
 
-class ITMPWsServerLink extends itmplink
-{
-  constructor(name, itmp, ws)
-  {
+class ITMPWsServerLink extends itmplink {
+  constructor(name, itmp, ws) {
     super(name)
     this.itmp = itmp
     this.ws = ws
@@ -27,27 +25,25 @@ class ITMPWsServerLink extends itmplink
       } else {
         msg = cbor.decode(message)
       }
-      that.emit('message',that, undefined, msg)
+      that.emit('message', that, undefined, msg)
       //console.log(msg)
       //if (typeof this.itmp.process === 'function') {  this.itmp.process(this, addr, msg)  }
     })
     this.ws.on('open', () => {
       this.ready = true // port opened flag
-      this.emit('connect',this)
+      this.emit('connect', this)
 
-/*      while (this.msgqueue.length > 0)
-      {
-        const [addr, binmsg] = this.msgqueue.shift()
-        this.send(addr, binmsg)
-      }*/
+      /*      while (this.msgqueue.length > 0)
+            {
+              const [addr, binmsg] = this.msgqueue.shift()
+              this.send(addr, binmsg)
+            }*/
     })
-    this.ws.on('pong', () =>
-    {
+    this.ws.on('pong', () => {
       this.isAlive = true
     })
-    this.ws.on('close', (code, reason) =>
-    {
-      that.emit('disconnect',that)
+    this.ws.on('close', (code, reason) => {
+      that.emit('disconnect', that)
       clearInterval(this.interval)
       this.interval = undefined
       console.log('closed ', name, code, reason)
@@ -59,25 +55,22 @@ class ITMPWsServerLink extends itmplink
         return this.ws.terminate()
       }
       this.isAlive = false
-      try{
-        this.ws.ping(() => {})
-      } catch ( er ) {
+      try {
+        this.ws.ping(() => { })
+      } catch (er) {
       }
     }, 30000)
 
-    setImmediate(()=>{
-      that.emit('connect',that)
+    setImmediate(() => {
+      that.emit('connect', that)
     })
   }
 
-  send(addr, binmsg)
-  {
-    if (this.ready)
-    {
-      try
-      {
+  send(addr, binmsg) {
+    if (this.ready) {
+      try {
         //this.ws.send(JSON.stringify(binmsg))
-      //  console.log(binmsg)
+        //  console.log(binmsg)
         let cmsg = cbor.encode(binmsg)
         //console.log(cmsg)
         this.ws.send(cmsg)
@@ -85,27 +78,23 @@ class ITMPWsServerLink extends itmplink
         this.sendamount = this.ws._sender.bufferedBytes
         //console.log(123456)
       }
-      catch (err)
-      {}
+      catch (err) { }
     }
-    else
-    {
+    else {
       this.msgqueue.push([addr, binmsg])
     }
   }
 
-  queueSize()
-  {
+  stop() { }
+  queueSize() {
     return this.msgqueue.length
   }
 }
 
-class ITMPWsServer extends EventEmitter
-{
-  constructor(itmp, name, opts)
-  {
+class ITMPWsServer extends EventEmitter {
+  constructor(itmp, name, opts) {
     super()
-    this.itmp=itmp
+    this.itmp = itmp
     let path
 
 
@@ -123,7 +112,7 @@ class ITMPWsServer extends EventEmitter
       expressws(this.app)
       // start server!
       this.server = this.app.listen(port, () => {
-        that.emit('connect',that)
+        that.emit('connect', that)
         console.log(`App listening on address '${this.server.address().address}' and port ${this.server.address().port}`)
       })
     }

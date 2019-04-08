@@ -6,13 +6,13 @@ const cbor = require('cbor-sync')
 //const URL = require('url')
 var URL = require('url').URL
 
-function tonumberifpossible(val){
+function tonumberifpossible(val) {
   const num = Number(val)
   if (isNaN(num)) return val
   return num
 }
 class ITMPSerialLink extends itmplink {
-  constructor (name, url, props) {
+  constructor(name, url, props) {
     super(name)
     const portprops = Object.assign({}, props)
     const parsedurl = new URL(url)
@@ -36,6 +36,7 @@ class ITMPSerialLink extends itmplink {
     this.cur_addr = 0 // current transaction address
     this.cur_buf = Buffer.allocUnsafe(1024)
     this.msgqueue = []
+    this.active = true
 
     // Open errors will be emitted as an error event
     this.port.on('error', (err) => {
@@ -49,6 +50,7 @@ class ITMPSerialLink extends itmplink {
       // open logic
       this.setready()
       this.setconnected()
+      this.emit('connect', this)
       //console.log('open')
     })
     this.reopen = (that) => {
@@ -61,7 +63,8 @@ class ITMPSerialLink extends itmplink {
       this.setready(false)
       this.setconnected(false)
       this.msgqueue.length = 0 // clear send queue
-      setTimeout(this.reopen, 100, this)
+      if (this.active)
+        setTimeout(this.reopen, 100, this)
       //console.log('close')
     })
     this.ports = {}
@@ -71,14 +74,20 @@ class ITMPSerialLink extends itmplink {
         const ctx = this
         ports.forEach((port) => {
           ctx.ports[port.comName] = port
-        // console.log(port.comName+JSON.stringify(port));
-        // console.log(port.manufacturer);
+          // console.log(port.comName+JSON.stringify(port));
+          // console.log(port.manufacturer);
         })
       }
     })
   }
 
-  income (data) {
+  stop() {
+    this.active = false
+    this.port.close()
+    clearTimeout(this.timerId)
+  }
+
+  income(data) {
     for (let i = 0; i < data.length; i++) {
       if (this.lastchar === 0x7d) {
         this.inbuf[this.inpos] = data[i] ^ 0x20
@@ -105,7 +114,7 @@ class ITMPSerialLink extends itmplink {
     }
   }
 
-  nexttransaction () {
+  nexttransaction() {
     if (this.msgqueue.length > 0) {
       const [addr, msg] = this.msgqueue.shift()
       this.cur_addr = addr
@@ -125,14 +134,14 @@ class ITMPSerialLink extends itmplink {
     }
   }
 
-  timeisout () {
+  timeisout() {
     if (typeof this.cur_err === 'function') {
       this.cur_err('timeout')
     }
     this.nexttransaction()
   }
 
-  send (addr, msg) {
+  send(addr, msg) {
     const binmsg = cbor.encode(msg)
 
     if (this.busy) {
@@ -147,7 +156,7 @@ class ITMPSerialLink extends itmplink {
     }
   }
 
-  internalsend (addr, binmsg) {
+  internalsend(addr, binmsg) {
     if (this.cur_buf.length < binmsg.length * 2) {
       this.cur_buf = Buffer.allocUnsafe(binmsg.length * 2)
     }
@@ -190,7 +199,17 @@ class ITMPSerialLink extends itmplink {
     // that.transactions.delete(key); prom.err("timeout"); }, 2000, key);
   }
 
-  connect(){}
+  async connect() {
+    return new Promise((resolve, reject) => {
+      if (this.isconnected()) {
+        resolve()
+      } else {
+        this.once('connect', () => {
+          resolve()
+        })
+      }
+    })
+  }
 }
 
 /*

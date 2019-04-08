@@ -16,10 +16,15 @@
   ],
   "author": "Alexey Tsigulin",
   "license": "MIT",
+  "bin": {
+    "itmp_call": "./bin/call.js",
+    "itmp": "./bin/itmpcli.js"
+  },
   "dependencies": {
     "cbor-sync": "^1.0.3",
     "express": "^4.16.4",
     "express-ws": "^4.0.0",
+    "minimist": "^1.2.0",
     "serialport": "^7.1.4"
   },
   "bugs": {
