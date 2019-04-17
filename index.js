@@ -585,6 +585,29 @@ class itmpClient extends EventEmitter {
     })
   }
 
+  getLink(addr) {
+    if (!addr) {
+      if (this.links.length === 1) {
+        let lnk = this.links.values().next().value
+        return [lnk, '']
+      }
+    }
+    const [linkname, subaddr = ''] = addr.split('#', 2)
+    const link = this.links.get(linkname)
+
+    return [link, subaddr]
+  }
+
+  // directPublish('com/4','reset',[12,45])
+  // directPublish('com/4','setspeed',[12,45])
+  directPublish(addr, topic, msg) {
+    const [to, subaddr] = this.getLink(addr)
+    if (to) {
+      const id = this.msgid++
+      to.send(subaddr, [13, id, topic, msg])
+    }
+  }
+
   // call('reset')
   // call('setspeed',[12,45])
   // call('com/4','reset')
