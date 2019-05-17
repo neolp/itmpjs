@@ -41,9 +41,10 @@ class ITMPWsLink extends itmplink {
     this.ws.on('open', function () { // open logic
       that.ready = true // port opened flag
       that.emit('connect')
+      console.log('ws connected')
     })
     this.ws.on('close', function (code, reason) {
-      //console.log('ITMPWsLink closed ', code, reason)
+      console.log('ITMPWsLink closed ', code, reason)
       that.ready = false
       that.emit('disconnect', code, reason)
       //if (this.settings.autoReconnect && this.reconnectCount < this.settings.reconnectMaxCount) {

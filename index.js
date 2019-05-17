@@ -139,7 +139,7 @@ class itmpClient extends EventEmitter {
     let [uri, opts] = payload
     if (opts === undefined || typeof opts !== 'object') opts = {}
     let event = { uri, opts, block: false }
-    this.off.emit(this.$connect, event)
+    this.emit(this.$connect, event)
     if (event.block) {
       this.answer(addr, [5, id, event.blockcode ? event.blockcode : 403, event.blockreason ? event.blockreason : 'forbidden'])
     } else {
