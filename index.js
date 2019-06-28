@@ -802,19 +802,16 @@ please rewrite this
           let link = new Link(index, url, opts)
           this.addLink(link)
           link.connect()
-          return index
         } else if (url.startsWith('ws://')) {
           let Link = require('./itmplinkws')
           let link = new Link(index, url, opts)
           this.addLink(link)
           link.connect()
-          return index
         } else if (url.startsWith('serial://')) {
           let Link = require('./itmplinkserial')
           let link = new Link(index, url, opts)
           this.addLink(link)
           link.connect()
-          return index
         }
       }
     }
