@@ -246,6 +246,24 @@ class itmpClient extends EventEmitter {
     //this.model.processIncomeEvent(link.connected ? `${link.connected.link}/${topic}` : `${addr}/${topic}`, args, ots)
   }
 
+  processPublish(link, addr, payload) {
+    // console.log("event",msg);
+    const [topicName, args, opts] = payload
+    let node = this.localsubscriptions.get(topicName)
+    if (node && node.onMessage) {
+      node.lastMessage = { topic: topicName, args, opts, link, addr }
+      node.onMessage(topicName, args, opts)
+    }
+    if (Array.isArray(args)) {
+      this.emit(this.$message, link, addr, topicName, args, opts)
+      this.emit(topicName, ...args, opts)
+    } else {
+      this.emit(this.$message, link, addr, topicName, args, opts)
+      this.emit(topicName, args, opts)
+    }
+    this.answer(addr, [15, id])
+  }
+
   processSubscribe(link, addr, id, payload) {
     const [originaluri, opts] = payload
     let uri
@@ -267,7 +285,7 @@ class itmpClient extends EventEmitter {
       if (typeof originaluri === 'string' && originaluri.length > 0) {
         link.subscriptions.set(originaluri, s)
         try {
-          this.emit(this.$subscribe, originaluri, addr)
+          this.emit(this.$subscribe, originaluri, addr, opts)
           this.answer(addr, [17, id])
         } catch (err) {
           this.answer(addr, [5, id, 500, err.message])
@@ -292,7 +310,7 @@ class itmpClient extends EventEmitter {
       }
       link.subscriptions.delete(uri)
       this.answer(addr, [19, id, ret])
-      this.emit(this.$unsubscribe, uri, addr)
+      this.emit(this.$unsubscribe, uri, addr, opts)
     } else {
       console.log(`unexpected subs${JSON.stringify(payload)}`)
       this.answer(addr, [5, id, 404, 'no such uri'])
@@ -366,19 +384,10 @@ class itmpClient extends EventEmitter {
         case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
           this.processDescribe(addr, id, payload)
           break
-        case 7: { // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
-          const t = this.transactions.get(key)
-          if (t !== undefined) {
-            clearTimeout(t.timeout)
-            this.transactions.delete(key)
-            const [result, properties] = payload
-            t.resolve(result, properties)
-          } else {
-            console.log('unexpected result', JSON.stringify(msg))
-          }
+        case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
+          this.processResult(key, payload)
           break
-        }
-        // RPC
+        // RPC -----------------------------
         case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
           this.processCall(link, addr, id, payload)
           break
@@ -395,14 +404,17 @@ class itmpClient extends EventEmitter {
         case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
           // publish
           break
+        // events and sub/pub ---------------------
         case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
           this.processEvent(link, addr, payload)
           break
         case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
-          console.log('publish', msg)
+          this.processPublish(link, addr, payload)
+          //console.log('publish', msg)
           break
         case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
-          console.log('published', msg)
+          //console.log('published', msg)
+          this.processResult(key, payload)
           break
         // subscribe
         case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
@@ -598,14 +610,34 @@ class itmpClient extends EventEmitter {
     return [link, subaddr]
   }
 
+  // publish('reset')
+  // publish('setspeed',[12,45])
+  // publish('com/4','alarm')
+  // publish('com/4','speed',[12,45])
+  publish2(addr, topic, message, opts) {
+    if (typeof addr === 'object' && addr !== null) {
+      message = addr.message
+      topic = addr.topic
+      addr = addr.address
+    } else if (arguments.length < 4 && typeof topic !== 'string') { // no address at all
+      opts = message
+      message = topic
+      topic = addr
+      addr = undefined
+    }
+    const msg = [14, 0, topic, message, opts] // 14 - publish message, 15 - published message
+    return this.transaction(addr, msg)
+  }
+
   // directPublish('com/4','reset',[12,45])
   // directPublish('com/4','setspeed',[12,45])
   directPublish(addr, topic, msg) {
     const [to, subaddr] = this.getLink(addr)
     if (to) {
       const id = this.msgid++
-      to.send(subaddr, [13, id, topic, msg])
+      return to.send(subaddr, [13, id, topic, msg])
     }
+    return Promise.reject('wrong addr')
   }
 
   // call('reset')

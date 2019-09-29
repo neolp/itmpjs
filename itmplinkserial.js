@@ -62,7 +62,11 @@ class ITMPSerialLink extends itmplink {
       // open logic
       this.setready(false)
       this.setconnected(false)
-      this.msgqueue.length = 0 // clear send queue
+      //      this.msgqueue.length = 0 // clear send queue
+      while (this.msgqueue.length > 0) {
+        const [addr, msg, resolve, reject] = this.msgqueue.shift()
+        reject()
+      }
       if (this.active)
         setTimeout(this.reopen, 100, this)
       //console.log('close')
@@ -116,13 +120,14 @@ class ITMPSerialLink extends itmplink {
 
   nexttransaction() {
     if (this.msgqueue.length > 0) {
-      const [addr, msg] = this.msgqueue.shift()
+      const [addr, msg, resolve, reject] = this.msgqueue.shift()
       this.cur_addr = addr
       clearTimeout(this.timerId)
       this.timerId = setTimeout(() => {
         this.timeisout()
       }, 200)
       this.internalsend(addr, msg)
+      resolve()
     } else {
       this.cur_addr = 0
       if (this.busy) {
@@ -144,16 +149,19 @@ class ITMPSerialLink extends itmplink {
   send(addr, msg) {
     const binmsg = cbor.encode(msg)
 
-    if (this.busy) {
-      this.msgqueue.push([addr, binmsg])
-    } else {
-      this.busy = true
-      this.cur_addr = addr
-      this.timerId = setTimeout(() => {
-        this.timeisout()
-      }, 100)
-      this.internalsend(addr, binmsg)
-    }
+    return new Promise((resolve, reject) => {
+      if (this.busy) {
+        this.msgqueue.push([addr, binmsg, resolve, reject])
+      } else {
+        this.busy = true
+        this.cur_addr = addr
+        this.timerId = setTimeout(() => {
+          this.timeisout()
+        }, 100)
+        this.internalsend(addr, binmsg)
+        resolve()
+      }
+    })
   }
 
   internalsend(addr, binmsg) {

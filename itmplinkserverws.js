@@ -67,22 +67,26 @@ class ITMPWsServerLink extends itmplink {
   }
 
   send(addr, binmsg) {
-    if (this.ready) {
-      try {
-        //this.ws.send(JSON.stringify(binmsg))
-        //  console.log(binmsg)
-        let cmsg = cbor.encode(binmsg)
-        //console.log(cmsg)
-        this.ws.send(cmsg)
-        this.sendlevel = this.ws._sender.queue.length
-        this.sendamount = this.ws._sender.bufferedBytes
-        //console.log(123456)
+    return new Promise((resolve, reject) => {
+      if (this.ready) {
+        try {
+          //this.ws.send(JSON.stringify(binmsg))
+          //  console.log(binmsg)
+          let cmsg = cbor.encode(binmsg)
+          //console.log(cmsg)
+          this.ws.send(cmsg, () => {
+            resolve()
+          })
+          this.sendlevel = this.ws._sender.queue.length
+          this.sendamount = this.ws._sender.bufferedBytes
+          //console.log(123456)
+        }
+        catch (err) { }
       }
-      catch (err) { }
-    }
-    else {
-      this.msgqueue.push([addr, binmsg])
-    }
+      else {
+        this.msgqueue.push([addr, binmsg, resolve, reject])
+      }
+    })
   }
 
   stop() { }

@@ -53,23 +53,30 @@ class ITMPWsLink extends itmplink {
     })
   }
   send(addr, binmsg) {
-    if (this.ws && this.ready) {
-      try {
-        if (this.binary) {
-          this.ws.send(cbor.encode(binmsg))
-        } else {
-          this.ws.send(JSON.stringify(binmsg))
+    return new Promise((resolve, reject) => {
+      if (this.ws && this.ready) {
+        try {
+          if (this.binary) {
+            this.ws.send(cbor.encode(binmsg), () => {
+              resolve()
+            })
+          } else {
+            this.ws.send(JSON.stringify(binmsg), () => {
+              resolve()
+            })
+          }
+        } catch (err) {
+          this.msgqueue.push([addr, binmsg, resolve, reject])
         }
-      } catch (err) {
-        this.msgqueue.push([addr, binmsg])
+      } else {
+        this.msgqueue.push([addr, binmsg, resolve, reject])
       }
-    } else {
-      this.msgqueue.push([addr, binmsg])
-    }
+    })
   }
 
   queueSize() {
     return this.msgqueue.length
+    //return this.ws.websocket.bufferedAmount //messages with multiple fragments.
   }
   stop() { }
 }
