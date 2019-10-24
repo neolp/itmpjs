@@ -246,7 +246,7 @@ class itmpClient extends EventEmitter {
     //this.model.processIncomeEvent(link.connected ? `${link.connected.link}/${topic}` : `${addr}/${topic}`, args, ots)
   }
 
-  processPublish(link, addr, payload) {
+  processPublish(link, addr, id, payload) {
     // console.log("event",msg);
     const [topicName, args, opts] = payload
     let node = this.localsubscriptions.get(topicName)
@@ -370,69 +370,69 @@ class itmpClient extends EventEmitter {
       }
 
       switch (command) {
-        case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
-          this.processConnect(link, addr, id, payload)
-          break
-        case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
-          this.processConnected(link, addr, key, payload)
-          break
-        case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
-        case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
-        case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
-          this.processError(key, payload)
-          break
-        case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
-          this.processDescribe(addr, id, payload)
-          break
-        case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
-          this.processResult(key, payload)
-          break
+      case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
+        this.processConnect(link, addr, id, payload)
+        break
+      case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
+        this.processConnected(link, addr, key, payload)
+        break
+      case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
+      case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
+      case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
+        this.processError(key, payload)
+        break
+      case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
+        this.processDescribe(addr, id, payload)
+        break
+      case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
+        this.processResult(key, payload)
+        break
         // RPC -----------------------------
-        case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
-          this.processCall(link, addr, id, payload)
-          break
-        case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
-          this.processResult(key, payload)
-          break
+      case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
+        this.processCall(link, addr, id, payload)
+        break
+      case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
+        this.processResult(key, payload)
+        break
         // RPC Extended
-        case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
-          //  additional arguments for call
-          break
-        case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
-          //  call in progress
-          break
-        case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
-          // publish
-          break
+      case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
+        //  additional arguments for call
+        break
+      case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
+        //  call in progress
+        break
+      case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
+        // publish
+        break
         // events and sub/pub ---------------------
-        case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
-          this.processEvent(link, addr, payload)
-          break
-        case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
-          this.processPublish(link, addr, payload)
-          //console.log('publish', msg)
-          break
-        case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
-          //console.log('published', msg)
-          this.processResult(key, payload)
-          break
+      case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
+        this.processEvent(link, addr, payload)
+        break
+      case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
+        this.processPublish(link, addr, id, payload)
+        //console.log('publish', msg)
+        break
+      case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
+        //console.log('published', msg)
+        this.processResult(key, payload)
+        break
         // subscribe
-        case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
-          this.processSubscribe(link, addr, id, payload)
-          break
-        case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
-          this.processSubscribed(link, addr, key, payload)
-          break
-        case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
-          this.processUnsubscribe(link, addr, id, payload)
-          break
-        case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
-          this.processUnsubscribed(link, addr, key, payload)
-          break
+      case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
+        this.processSubscribe(link, addr, id, payload)
+        break
+      case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
+        this.processSubscribed(link, addr, key, payload)
+        break
+      case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
+        this.processUnsubscribe(link, addr, id, payload)
+        break
+      case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
+        this.processUnsubscribed(link, addr, key, payload)
+        break
         // keep alive
-        case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
-        case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
-        default:
+      case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
+      case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
+      default:
       }
     } else {
       console.log('wrong message ', msg)
@@ -586,17 +586,6 @@ class itmpClient extends EventEmitter {
     }
   }
 */
-  // publish('speed',[12,45])
-  publish(topic, msg) {
-    this.links.forEach((link, key, map) => {
-      const to = link.subscriptions.get(topic)
-      if (to) {
-        const id = this.msgid++
-        link.send(to ? to.subaddr : undefined, [13, id, topic, msg])
-      }
-    })
-  }
-
   getLink(addr) {
     if (!addr) {
       if (this.links.length === 1) {
@@ -614,7 +603,7 @@ class itmpClient extends EventEmitter {
   // publish('setspeed',[12,45])
   // publish('com/4','alarm')
   // publish('com/4','speed',[12,45])
-  publish2(addr, topic, message, opts) {
+  publishEvent(addr, topic, message, opts) {
     if (typeof addr === 'object' && addr !== null) {
       message = addr.message
       topic = addr.topic
@@ -629,15 +618,26 @@ class itmpClient extends EventEmitter {
     return this.transaction(addr, msg)
   }
 
-  // directPublish('com/4','reset',[12,45])
-  // directPublish('com/4','setspeed',[12,45])
-  directPublish(addr, topic, msg) {
+  // sendEvent('com/4','reset',[12,45])
+  // sendEvent('com/4','setspeed',[12,45])
+  sendEvent(addr, topic, msg, opts) {
     const [to, subaddr] = this.getLink(addr)
     if (to) {
       const id = this.msgid++
-      return to.send(subaddr, [13, id, topic, msg])
+      return to.send(subaddr, [13, id, topic, msg, opts])
     }
     return Promise.reject('wrong addr')
+  }
+
+  // publish('speed',[12,45])
+  sendEventAllSubscribed(topic, msg) {
+    this.links.forEach((link, key, map) => {
+      const to = link.subscriptions.get(topic)
+      if (to) {
+        const id = this.msgid++
+        link.send(to ? to.subaddr : undefined, [13, id, topic, msg])
+      }
+    })
   }
 
   // call('reset')
