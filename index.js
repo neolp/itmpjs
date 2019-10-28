@@ -44,8 +44,26 @@ const knownschemas = {
   serial: './itmplinkserial'
 }
 
+function strdivide(str, divider) {
+  let pos = str.indexOf(divider)
+  if (pos < 0) return [str, '']
+  return [str.substring(0, pos), str.substring(pos + 1)]
+
+  // itmp://com:1
+  // let delim = name.indexOf(':')
+  // if (delim < 0) return [this.connectors.get(name), undefined]
+  // return [this.connectors.get(name.substring(0, delim)), name.substring(delim + 1)]
+  //    let parts = name.split(':', 2)
+  //    return [this.connectors.get(parts[0]), parts[1]]
+
+}
+function strdivideend(str, divider) {
+  let pos = str.lastIndexOf(divider)
+  if (pos < 0) return [str, '']
+  return [str.substring(0, pos), str.substring(pos + 1)]
+}
 class itmpClient extends EventEmitter {
-  constructor() {
+  constructor(cfg) {
     super()
     this.$connect = Symbol('connect') // event fired when client send message connect with connect parameters (event = {uri,opts,block:false})
     this.$connected = Symbol('connected') // event fired wthen client fully connected (and resubscription was finished)
@@ -74,6 +92,14 @@ class itmpClient extends EventEmitter {
         this._unsubscribe(eventName)
       }
     })
+    if (typeof cfg === 'object') {
+      if (cfg.connect) {
+        this.connect(cfg.connect)
+      }
+      if (cfg.listen) {
+        this.listen(cfg.listen)
+      }
+    }
   }
 
   // add new link (new connection)
@@ -355,7 +381,7 @@ class itmpClient extends EventEmitter {
     if (typeof addr === 'undefined' || (typeof addr === 'string' && addr.length === 0)) {
       addr = link.linkname
     } else {
-      addr = `${link.linkname}#${addr}`
+      addr = `${link.linkname}~${addr}`
     }
     if (Array.isArray(msg) && msg.length >= 1 && typeof msg[0] === 'number') {
       let [command, ...payload] = msg
@@ -443,7 +469,8 @@ class itmpClient extends EventEmitter {
     let subaddr = ''
     let linkname = ''
     if (typeof addr === 'string') {
-      const addrparts = addr.split('/', 2)
+      const addrparts = strdivide(addr, '/') //addr.split('/', 2)
+      //TODO REFACTOR THIS
       if (Array.isArray(addrparts)) {
         linkname = addrparts[0]
         subaddr = addrparts[1]
@@ -507,7 +534,7 @@ class itmpClient extends EventEmitter {
     }
 
     /* let sent = */ link.send(subaddr, msg)
-    if (subaddr) subaddr = `#${subaddr}`
+    if (subaddr) subaddr = `~${subaddr}`
     const key = `${link.linkname}${subaddr}:${(typeof msg[1] === 'number') ? msg[1] : ''}`
 
     /* const timerId = setTimeout((tkey) => {
@@ -541,7 +568,7 @@ class itmpClient extends EventEmitter {
       }
       return Promise.reject(new Error('wrong address'))
     }
-    const [linkname, subaddr = ''] = addr.split('#', 2)
+    const [linkname, subaddr] = strdivideend(addr, '~') //addr.split(':', 2)
     const link = this.links.get(linkname)
 
     return this.transactionLink(link, subaddr, msg, timeout)
@@ -593,7 +620,7 @@ class itmpClient extends EventEmitter {
         return [lnk, '']
       }
     }
-    const [linkname, subaddr = ''] = addr.split('#', 2)
+    const [linkname, subaddr] = strdivideend(addr, '~') //addr.split(':', 2)
     const link = this.links.get(linkname)
 
     return [link, subaddr]
@@ -805,7 +832,8 @@ please rewrite this
     let subaddr = ''
     let linkname = ''
     if (typeof addr === 'string') {
-      const addrparts = addr.split('/', 2)
+      const addrparts = strdivide(addr, '/') //addr.split('/', 2)
+      //TODO REFACTOR THIS
       if (Array.isArray(addrparts)) {
         linkname = addrparts[0]
         subaddr = addrparts[1]
@@ -827,7 +855,7 @@ please rewrite this
     for (let index in urls) {
       let url = urls[index]
       if (typeof url === 'string') {
-        let urlparts = url.split('://', 2)
+        let urlparts = strdivide(url, '://') //url.split('://', 2)
         let linkref = knownschemas[urlparts[0]]
         if (linkref) {
           let Link = require(linkref)

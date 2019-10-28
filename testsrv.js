@@ -1,8 +1,8 @@
 var itmp = require('./itmp4.js')
 
 var server = new itmp().listen({
-//  mqtt: 'tcp://localhost:1883',
-//  mqtts: 'ssl://localhost:8883',
+  //  mqtt: 'tcp://localhost:1883',
+  //  mqtts: 'ssl://localhost:8883',
   mqttws: 'ws://localhost:1884/ws',
   //  mqtwss: 'wss://localhost:8884'
 }, {/*
@@ -16,9 +16,9 @@ var server = new itmp().listen({
     returnCode: 0
   })
 }).connect({
-  com:'serial://COM3?baudRate=115200&dataBits=8&stopBits=1&parity=none'
-//  com:'serial:///dev/ttyS0?baudRate=115200&dataBits=8&stopBits=1&parity=none'
-//  com2:'serial:///dev/ttyAMA0?baudRate=115200&dataBits=8&stopBits=1&parity=none'
+  com: 'serial://COM3?baudRate=115200&dataBits=8&stopBits=1&parity=none'
+  //  com:'serial:///dev/ttyS0?baudRate=115200&dataBits=8&stopBits=1&parity=none'
+  //  com2:'serial:///dev/ttyAMA0?baudRate=115200&dataBits=8&stopBits=1&parity=none'
 }, {/*
     ssl: {
       key: fs.readFileSync('./server.key'),
@@ -36,17 +36,17 @@ server.listen(() => {
 })
 */
 let cnt = 1
-function tm(){
+function tm() {
   cnt++
   server.publish('msg', [cnt])
   console.log('publish msg')
 }
-var tmint 
+var tmint
 
 var state = new Map()
-function sr(){
+function sr() {
   let that = state
-  server.call('com#46','get', []).then((data) => {
+  server.call('com~46', 'get', []).then((data) => {
     if (data[0] > 1000 || data[0] < 0) {
       that.set('H', NaN)
       that.set('T', NaN)
@@ -60,18 +60,18 @@ function sr(){
       console.log(JSON.stringify([...that]))
     }
     return { H: that.get('H'), T: that.get('T') }
-  }).catch((err)=>{
+  }).catch((err) => {
     that.set('statecode', err.code || 500)
     that.set('state', 'offline')
-    console.log ('HT err', err)
+    console.log('HT err', err)
   })
-  
+
 }
 
 setInterval(sr, 5000)
 
 server.on(server.$connect, function (link) {
-  console.log('srv connect',link)
+  console.log('srv connect', link)
   /*server.subscribe('presence', function (err) {
     if (!err) {
       server.publish('presence', 'Hello mqtt')
@@ -82,16 +82,16 @@ server.on(server.$connect, function (link) {
 
 server.on(server.$disconnect, function (link) {
   console.log('srv disconnect')
-/*  server.subscribe('presence', function (err) {
-    if (!err) {
-      server.publish('presence', 'Hello mqtt')
-    }
-  })*/
+  /*  server.subscribe('presence', function (err) {
+      if (!err) {
+        server.publish('presence', 'Hello mqtt')
+      }
+    })*/
 })
 
 server.on(server.$subscribe, (topic) => {
   if (topic === 'msg')
-    if (!tmint) 
+    if (!tmint)
       tmint = setInterval(tm, 1000)
 })
 
@@ -104,10 +104,10 @@ server.on(server.$unsubscribe, (topic) => {
 })
 
 server.on(server.$subscribe, function (topic, link) {
-  console.log('srv subscribe',link,topic)
+  console.log('srv subscribe', link, topic)
 })
 server.on(server.$unsubscribe, function (topic, link) {
-  console.log('srv unsubscribe',link,topic)
+  console.log('srv unsubscribe', link, topic)
 })
 
 server.on(server.$message, function (link, addr, topic, message) {
@@ -125,6 +125,6 @@ server.on('msg', function (message) {
 server.on('presence', function (message) {
   // message is Buffer
   console.log(message.toString())
-  server.emit('msg','')
+  server.emit('msg', '')
   //server.end()
 })

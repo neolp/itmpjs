@@ -15,7 +15,7 @@ async function send(args) {
     console.log('connected')
     if (args.parameters) args.parameters = JSON.parse(args.parameters)
     if (!args.parameters) args.parameters = []
-    client.call(link + '#' + args.address, args.topic, args.parameters, []).then((err) => { //args.parameters
+    client.call(link + '~' + args.address, args.topic, args.parameters, []).then((err) => { //args.parameters
       console.log(JSON.stringify(err))
       client.deleteConnection(link)
       //client.end()
