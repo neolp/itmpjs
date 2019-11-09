@@ -8,6 +8,9 @@ var defaultConnectOptions = {
   resubscribe: true
 }
 
+function extractpurename(name) {
+  return name.split('~')[0]
+}
 // itmp error codes and its descriptions
 var errors = {
   304: 'Not Modified',
@@ -47,7 +50,7 @@ const knownschemas = {
 function strdivide(str, divider) {
   let pos = str.indexOf(divider)
   if (pos < 0) return [str, '']
-  return [str.substring(0, pos), str.substring(pos + 1)]
+  return [str.substring(0, pos), str.substring(pos + divider.length)]
 
   // itmp://com:1
   // let delim = name.indexOf(':')
@@ -60,8 +63,17 @@ function strdivide(str, divider) {
 function strdivideend(str, divider) {
   let pos = str.lastIndexOf(divider)
   if (pos < 0) return [str, '']
-  return [str.substring(0, pos), str.substring(pos + 1)]
+  return [str.substring(0, pos), str.substring(pos + divider.length)]
 }
+
+class itmpConnection {
+  constructor(name, link) {
+    this.subscriptions = new Map() // map url to object
+    this.link = link
+    this.name = name
+  }
+}
+
 class itmpClient extends EventEmitter {
   constructor(cfg) {
     super()
@@ -72,7 +84,8 @@ class itmpClient extends EventEmitter {
     this.$unsubscribe = Symbol('unsubscribe') //  event fired when client unsubscribe for topic
     this.$message = Symbol('message')  //  event fired when client send an event
     this.$error = Symbol('error')  //  event fired when client error
-    this.links = new Map() // handle all links
+    this.links = new Map() // handle all links without subaddress
+    this.cons = new Map() // handle all links together with subaddress
     this.listeners = new Map() // handle all listeners for incoming connection
 
     this.urls = new Map() // handle all internal urls
@@ -82,16 +95,19 @@ class itmpClient extends EventEmitter {
     this.localsubscriptionsid = 1 // index of subscription for local subscribers (programmaticaly subscribed)
     this.errors = errors // handle error codes and their descriptions
 
-    this.on('newListener', (eventName, listener) => { // when subscribe new listener (it is from 'events' interface)
+    // then add/remove listeners subscribe/unsubscribe for that events 
+    // TODO refactor this
+    this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         this._subscribe(eventName)
       }
     })
-    this.on('removeListener', (eventName, listener) => { // when unsubscribe the listener (it is from 'events' interface)
+    this.on('removeListener', (eventName) => { // when unsubscribe the listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         this._unsubscribe(eventName)
       }
     })
+    //configure connections
     if (typeof cfg === 'object') {
       if (cfg.connect) {
         this.connect(cfg.connect)
@@ -102,66 +118,85 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  // add new link (new connection)
-  addLink(link) {
-    const linkname = link.linkname
-    this.links.set(linkname, link)
-    link.on('connect', async () => { // then link connected (become active) send initial CONNECT message and then got answer make link connected
-      if (link.isconnected()) {
-        this.emit(this.$connected, linkname)
-        return
-      }
-      this.transactionLink(link, undefined, [0, 0, ''], 30000).then(() => {
-        this.emit(this.$connected, linkname)
-      }).catch((err) => {
-        //TODO we should do something else
-        this.emit(this.$connected, linkname)
-      })
-    })
-    link.on('disconnect', () => { // then link disconnected unsubscribe all topics from thet link
-      link.subscriptions.forEach((val, uri) => {
-        if (val.unsubscribe) {
-          val.unsubscribe(uri, null, val)
-        }
-        this.emit(this.$unsubscribe, uri, val.addr)
-      })
-      link.subscriptions.clear()
-      this.emit(this.$disconnected)
-    })
-    link.on('message', (link, subaddr, msg) => {
-      //      console.log('income message',JSON.stringify(msg))
-      this.process(link, subaddr, msg)
-    })
-  }
-  addListener(listener) {
-    const listenername = listener.listenername
-    this.listeners.set(listenername, listener)
-  }
-  setGeneralCall(call) {
-    this.gencall = call
-  }
-
-  deleteConnection(name) {
-    let link = this.links.get(name)
-    if (this.model) {
-      this.model.disconnect(link)
-    }
-    // remove incoming subscriptions
-    link.subscriptions.forEach((val, uri) => {
+  unsubscribeCon(con) {
+    con.subscriptions.forEach((val, uri) => {
       if (val.unsubscribe) {
         val.unsubscribe(uri, null, val)
       }
-      this.emit(this.$unsubscribe, uri, val)
+      this.emit(this.$unsubscribe, uri, val.addr)
     })
-    link.subscriptions.clear()
+    con.subscriptions.clear()
+
+  }
+
+
+  // add new link (new connection)
+  addLink(linkname, link) {
+    //const purename = extractpurename(linkname)
+    this.links.set(linkname, link)
+    //let con = this.addCon(linkname)
+    link.on('connect', async () => { // then link connected (become active) send initial CONNECT message and then got answer make link connected
+      //      if (link.isconnected()) {
+      this.emit(this.$connected, linkname)
+      //   return
+      // }
+      // this.transactionCon(con, undefined, [0, 0, ''], 30000).then(() => {
+      //   this.emit(this.$connected, linkname)
+      // }).catch((err) => {
+      //   //TODO we should do something else
+      //   this.emit(this.$connected, linkname, err)
+      // })
+    })
+    link.on('disconnect', () => { // then link disconnected unsubscribe all topics from that link
+      link.cons.forEach((con) => {
+        this.unsubscribeCon(con)
+      })
+      this.emit(this.$disconnected, linkname)
+    })
+    link.on('message', (link, addr, msg) => {
+      //      console.log('income message',JSON.stringify(msg))
+
+      let con = this.getConection(addr)
+      if (con)
+        this.process(con, addr, msg)
+    })
+  }
+
+  deleteLink(name) {
+    let link = this.links.get(name)
+    link.cons.forEach((con, conname) => {
+      this.unsubscribeCon(con)
+      this.cons.delete(conname)
+    })
+    link.cons.clear()
+    this.links.delete(name)
     link.removeAllListeners('connect')
     link.removeAllListeners('disconnect')
     link.removeAllListeners('message')
     link.stop()
-    this.links.delete(name)
   }
 
-  processConnect(link, addr, id, payload) {
+  deleteConnection(name) {
+    let con = this.cons.get(name)
+    this.unsubscribeCon(con)
+    this.cons.delete(name)
+    con.link.cons.delete(name)
+    if (con.link.cons.length === 0) {
+      this.deleteLink(con.link.purename)
+    }
+  }
+
+
+  addListener(listener) {
+    const listenername = listener.listenername
+    this.listeners.set(listenername, listener)
+  }
+
+  setGeneralCall(call) {
+    this.gencall = call
+  }
+
+  processConnect(con, addr, id, payload) {
     let [uri, opts] = payload
     if (opts === undefined || typeof opts !== 'object') opts = {}
     let event = { uri, opts, block: false }
@@ -170,14 +205,14 @@ class itmpClient extends EventEmitter {
       this.answer(addr, [5, id, event.blockcode ? event.blockcode : 403, event.blockreason ? event.blockreason : 'forbidden'])
     } else {
       console.log('got connect restore subscriptions')
-      this._resubscribe(link, undefined).then(() => {
+      this._resubscribe(con, undefined).then(() => {
         console.log('reconnected')
         this.answer(addr, [1, id, 'ok'])
       })
     }
   }
 
-  processConnected(link, addr, key, payload) {
+  processConnected(con, addr, key, payload) {
     // this.processConnect()
     const t = this.transactions.get(key)
     if (t !== undefined) {
@@ -205,7 +240,7 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processCall(link, addr, id, payload) {
+  processCall(con, addr, id, payload) {
     const [uri, args, opts] = payload
     if (this.urls.has(uri)) {
       let node = this.urls.get(uri)
@@ -254,62 +289,62 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processEvent(link, addr, payload) {
+  processEvent(con, addr, payload) {
     // console.log("event",msg);
     const [topicName, args, opts] = payload
     let node = this.localsubscriptions.get(topicName)
     if (node && node.onMessage) {
-      node.lastMessage = { topic: topicName, args, opts, link, addr }
+      node.lastMessage = { topic: topicName, args, opts, con, addr }
       node.onMessage(topicName, args, opts)
     }
     if (Array.isArray(args)) {
-      this.emit(this.$message, link, addr, topicName, args, opts)
+      this.emit(this.$message, con, addr, topicName, args, opts)
       this.emit(topicName, ...args, opts)
     } else {
-      this.emit(this.$message, link, addr, topicName, args, opts)
+      this.emit(this.$message, con, addr, topicName, args, opts)
       this.emit(topicName, args, opts)
     }
-    //this.model.processIncomeEvent(link.connected ? `${link.connected.link}/${topic}` : `${addr}/${topic}`, args, ots)
+    //this.model.processIncomeEvent(con.connected ? `${con.connected.con}/${topic}` : `${addr}/${topic}`, args, ots)
   }
 
-  processPublish(link, addr, id, payload) {
+  processPublish(con, addr, id, payload) {
     // console.log("event",msg);
     const [topicName, args, opts] = payload
     let node = this.localsubscriptions.get(topicName)
     if (node && node.onMessage) {
-      node.lastMessage = { topic: topicName, args, opts, link, addr }
+      node.lastMessage = { topic: topicName, args, opts, con, addr }
       node.onMessage(topicName, args, opts)
     }
     if (Array.isArray(args)) {
-      this.emit(this.$message, link, addr, topicName, args, opts)
+      this.emit(this.$message, con, addr, topicName, args, opts)
       this.emit(topicName, ...args, opts)
     } else {
-      this.emit(this.$message, link, addr, topicName, args, opts)
+      this.emit(this.$message, con, addr, topicName, args, opts)
       this.emit(topicName, args, opts)
     }
     this.answer(addr, [15, id])
   }
 
-  processSubscribe(link, addr, id, payload) {
+  processSubscribe(con, addr, id, payload) {
     const [originaluri, opts] = payload
     let uri
-    if (link.connected) {
+    if (con.connected) {
       //console.log('linked subscribe', addr, ' for ', originaluri)
-      uri = `area${link.connected.link}/${originaluri}`
+      uri = `area${con.connected.con}/${originaluri}`
     } else {
       uri = originaluri
     }
     //console.log('subscribe', addr, ' for ', uri)
 
-    if (!link.subscriptions.has(originaluri)) {
-      const s = { link, addr/*, emit:this.emitEvent.bind(this)*/ }
+    if (!con.subscriptions.has(originaluri)) {
+      const s = { con, addr/*, emit:this.emitEvent.bind(this)*/ }
       //const ret = this.model.subscribe(uri, opts, s)
       //if (ret === undefined) {
       //console.log(`fault subs${JSON.stringify(payload)}`)
       //this.answer(addr, [5, id, 404, 'no such uri'])
       //} else {
       if (typeof originaluri === 'string' && originaluri.length > 0) {
-        link.subscriptions.set(originaluri, s)
+        con.subscriptions.set(originaluri, s)
         try {
           this.emit(this.$subscribe, originaluri, addr, opts)
           this.answer(addr, [17, id])
@@ -325,16 +360,16 @@ class itmpClient extends EventEmitter {
       this.answer(addr, [5, id, 409, 'already subscribed'])
     }
   }
-  processUnsubscribe(link, addr, id, payload) {
+  processUnsubscribe(con, addr, id, payload) {
     const [uri, opts] = payload
     //console.log('unsubscribe', addr, ' at ', uri)
-    const s = link.subscriptions.get(uri)
+    const s = con.subscriptions.get(uri)
     if (s !== undefined) {
       let ret
       if (s.unsubscribe) {
         ret = s.unsubscribe(uri, opts, s)
       }
-      link.subscriptions.delete(uri)
+      con.subscriptions.delete(uri)
       this.answer(addr, [19, id, ret])
       this.emit(this.$unsubscribe, uri, addr, opts)
     } else {
@@ -354,7 +389,7 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processSubscribed(link, addr, key, payload) {
+  processSubscribed(con, addr, key, payload) {
     const t = this.transactions.get(key)
     if (t !== undefined) {
       this.transactions.delete(key)
@@ -365,7 +400,7 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processUnsubscribed(link, addr, key, payload) {
+  processUnsubscribed(con, addr, key, payload) {
     const t = this.transactions.get(key)
     if (t !== undefined) {
       clearTimeout(t.timeout)
@@ -377,12 +412,7 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  process(link, addr, msg) {
-    if (typeof addr === 'undefined' || (typeof addr === 'string' && addr.length === 0)) {
-      addr = link.linkname
-    } else {
-      addr = `${link.linkname}~${addr}`
-    }
+  process(con, addr, msg) {
     if (Array.isArray(msg) && msg.length >= 1 && typeof msg[0] === 'number') {
       let [command, ...payload] = msg
       let key
@@ -397,10 +427,10 @@ class itmpClient extends EventEmitter {
 
       switch (command) {
       case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
-        this.processConnect(link, addr, id, payload)
+        this.processConnect(con, addr, id, payload)
         break
       case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
-        this.processConnected(link, addr, key, payload)
+        this.processConnected(con, addr, key, payload)
         break
       case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
       case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
@@ -415,7 +445,7 @@ class itmpClient extends EventEmitter {
         break
         // RPC -----------------------------
       case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
-        this.processCall(link, addr, id, payload)
+        this.processCall(con, addr, id, payload)
         break
       case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
         this.processResult(key, payload)
@@ -432,10 +462,10 @@ class itmpClient extends EventEmitter {
         break
         // events and sub/pub ---------------------
       case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
-        this.processEvent(link, addr, payload)
+        this.processEvent(con, addr, payload)
         break
       case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
-        this.processPublish(link, addr, id, payload)
+        this.processPublish(con, addr, id, payload)
         //console.log('publish', msg)
         break
       case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
@@ -444,16 +474,16 @@ class itmpClient extends EventEmitter {
         break
         // subscribe
       case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
-        this.processSubscribe(link, addr, id, payload)
+        this.processSubscribe(con, addr, id, payload)
         break
       case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
-        this.processSubscribed(link, addr, key, payload)
+        this.processSubscribed(con, addr, key, payload)
         break
       case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
-        this.processUnsubscribe(link, addr, id, payload)
+        this.processUnsubscribe(con, addr, id, payload)
         break
       case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
-        this.processUnsubscribed(link, addr, key, payload)
+        this.processUnsubscribed(con, addr, key, payload)
         break
         // keep alive
       case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
@@ -465,60 +495,20 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  answer(addr, msg, err) {
-    let subaddr = ''
-    let linkname = ''
-    if (typeof addr === 'string') {
-      const addrparts = strdivide(addr, '/') //addr.split('/', 2)
-      //TODO REFACTOR THIS
-      if (Array.isArray(addrparts)) {
-        linkname = addrparts[0]
-        subaddr = addrparts[1]
-      } else {
-        linkname = addr
-      }
+  answer(addr, msg) {
+    const con = this.cons.get(addr)
+    if (!con) {
+      throw new Error('no link')
     }
-    const link = this.links.get(linkname)
-    if (typeof link !== 'object' && typeof err === 'function') {
-      err(500, 'no link')
-    }
-
-    // let that = this;
-
-    link.send(subaddr, msg)
-    // var key = addr+":"+((typeof msg[1] === "number" ) ? msg[1] : "");
-    // var timerId = setTimeout( (key)=>{ var prom = that.transactions.get(key);
-    // that.transactions.delete(key); prom.err("timeout");
-    // }, 2000, key);
-    // that.transactions.set(key, {'done':done, 'err':err, 'timeout':timerId, 'msg':msg} );
+    con.link.send(addr, msg)
   }
-  /*
-  getLink (addr) {
-    const [linkname, subaddr, uri] = addr.split('/', 3)
-    let link
-    let lnkname
-    if (this.links.length === 1){
-      for ( [lnkname, link] of this.links.entries()) {
-      }
-      if (lnkname.length!==0){
-        link = undefined
-      }
-    }
-    if (!link) link = this.links.get(linkname)
-    if (!link || !link.addressable) {
-      if (uri) {
-        return [link, undefined, `${subaddr}/${uri}`]
-      }
-      return [link, undefined, subaddr]
-    }
-    return [link, subaddr, uri]
-  }
-*/
-  transactionLink(link, subaddr = '', msg, timeout = 600) {
-    if (typeof link !== 'object') {
+
+  transactionCon(con, addr, msg, timeout = 600) {
+    if (typeof con !== 'object') {
       return Promise.reject(new Error('500 no such link'))
     }
 
+    // TODO move transactions keys to con
     var that = this
     if (typeof msg[1] === 'number') {
       this.msgid++
@@ -530,57 +520,46 @@ class itmpClient extends EventEmitter {
       }
       msg[1] = this.msgid
     } else {
-      console.log('wrong message')
+      return Promise.reject(new Error('500 wrong message')) //console.log('wrong message')
     }
 
-    /* let sent = */ link.send(subaddr, msg)
-    if (subaddr) subaddr = `~${subaddr}`
-    const key = `${link.linkname}${subaddr}:${(typeof msg[1] === 'number') ? msg[1] : ''}`
-
-    /* const timerId = setTimeout((tkey) => {
-      const prom = that.transactions.get(tkey); that.transactions.delete(tkey)
-      if (typeof prom.err === 'function') {
-        prom.err(504, 'timeout')
-      }
-    }, 200, key) */
-    let promise = new Promise((resolve, reject) => {
+    /* let sent = */ con.link.send(addr, msg)
+    const key = `${addr}:${msg[1]}`
+    return new Promise((resolve, reject) => {
       const timerId = setTimeout((tkey) => {
-        // const prom = that.transactions.get(tkey)
         that.transactions.delete(tkey)
         reject(new Error('504 timeout'))
-        /*        if (typeof prom.err === 'function') {
-          prom.err(504, 'timeout')
-        } */
       }, timeout, key)
       that.transactions.set(key, { resolve, reject, timeout: timerId, msg })
     })
-    //    that.transactions.set(key, { promise, timeout: timerId, msg })
-    //    that.transactions.set(key, { done, err, timeout: timerId, msg })
-    // await sent ???
-    return promise
   }
 
+  getConection(addr) {
+    let con = this.cons.get(addr)
+    if (con) return con
+    let link = this.links.get(extractpurename(addr))
+    if (!link) return undefined
+    con = new itmpConnection(addr, link)
+    link.cons.set(addr, con)
+    this.cons.set(addr, con)
+    return con
+  }
   transaction(addr, msg, timeout = 600) {
-    if (!addr) {
-      if (this.links.length === 1) {
-        let lnk = this.links.values().next().value
-        return this.transactionLink(lnk, subaddr, msg, timeout)
-      }
-      return Promise.reject(new Error('wrong address'))
+    let con = this.getConection(addr)
+    if (!con) {
+      if (!con)
+        return Promise.reject(new Error('no such link'))
     }
-    const [linkname, subaddr] = strdivideend(addr, '~') //addr.split(':', 2)
-    const link = this.links.get(linkname)
-
-    return this.transactionLink(link, subaddr, msg, timeout)
+    return this.transactionCon(con, addr, msg, timeout)
   }
 
-  _resubscribe(link, subaddr) {
+  _resubscribe(con, subaddr) {
     const that = this
-    //    return this.transactionLink(link, subaddr, [0,0,'']).then(()=>{
+    //    return this.transactionLink(con, subaddr, [0,0,'']).then(()=>{
     const rets = []
     that.eventNames().forEach((topicName) => {
       if (typeof topicName === 'string' && topicName !== 'newListener' && topicName !== 'removeListener') {
-        rets.push(that.transactionLink(link, subaddr, [16, 0, topicName]))
+        rets.push(that.transactionCon(con, subaddr, [16, 0, topicName]))
       }
 
     })
@@ -648,48 +627,36 @@ class itmpClient extends EventEmitter {
   // sendEvent('com/4','reset',[12,45])
   // sendEvent('com/4','setspeed',[12,45])
   sendEvent(addr, topic, msg, opts) {
-    const [to, subaddr] = this.getLink(addr)
-    if (to) {
+    let con = this.cons.get(addr)
+    if (con) {
       const id = this.msgid++
-      return to.send(subaddr, [13, id, topic, msg, opts])
+      return con.link.send(addr, [13, id, topic, msg, opts])
     }
     return Promise.reject('wrong addr')
   }
 
   // publish('speed',[12,45])
   sendEventAllSubscribed(topic, msg) {
-    this.links.forEach((link, key, map) => {
-      const to = link.subscriptions.get(topic)
+    this.cons.forEach((con, key, map) => {
+      const to = con.subscriptions.get(topic)
       if (to) {
         const id = this.msgid++
-        link.send(to ? to.subaddr : undefined, [13, id, topic, msg])
+        con.con.send(to ? to.subaddr : undefined, [13, id, topic, msg])
       }
     })
   }
 
-  // call('reset')
-  // call('setspeed',[12,45])
   // call('com/4','reset')
   // call('com/4','setspeed',[12,45])
   call(addr, name, args) {
-    if (typeof addr === 'object' && addr !== null) {
-      args = addr.arguments
-      name = addr.topic || addr.name
-      addr = addr.address
-    } else if (arguments.length < 3 && typeof name !== 'string') { // no address at all
-      args = name
-      name = addr
-      addr = undefined
-    }
-    const msg = [8, 0, name, args]
-    return this.transaction(addr, msg)
+    return this.transaction(addr, [8, 0, name, args])
   }
 
   // subscribe('topic')
   // subscribe('topic', (msg)=>{} )
   // subscribe('topic', {retain:'dead'} )
   // subscribe('topic', {retain:'dead'}, (msg)=>{} )
-  // subscribe('address', 'topic')  subscribe for topic from specific link
+  // subscribe('address', 'topic')  subscribe for topic from specific con
   // subscribe('address', 'topic', (msg)=>{})
   // subscribe('address', 'topic', {retain:'dead'})
   // subscribe('address', 'topic', {retain:'dead'}, (msg)=>{})
@@ -742,7 +709,7 @@ class itmpClient extends EventEmitter {
   }
 
   // unsubscribe('topic')
-  // unsubscribe('address', 'topic')  unsubscribe from topic from specific link
+  // unsubscribe('address', 'topic')  unsubscribe from topic from specific con
   _unsubscribe(addr, topicName) {
     if (typeof addr === 'object' && addr !== null) {
       topicName = addr.topic
@@ -841,36 +808,35 @@ please rewrite this
         linkname = addr
       }
     }
-    const link = this.links.get(linkname)
-    if (typeof link !== 'object') {
+    const con = this.links.get(linkname)
+    if (typeof con !== 'object') {
       return -1
     }
 
-    return link.queueSize(subaddr)
+    return con.queueSize(subaddr)
   }
 
+  prepareLink(url) {
+    let urlparts = strdivide(url, '://')
+    const parsedurl = new URL(url)
+    let purename = extractpurename(parsedurl.host)
+    if (this.links.has(purename))
+      return
+
+    this.connect(url)
+  }
   connect(urls, opts) {
     opts = Object.assign({}, defaultConnectOptions, opts)
     if (typeof urls === 'string') urls = [urls]
     for (let index in urls) {
       let url = urls[index]
       if (typeof url === 'string') {
-        let urlparts = strdivide(url, '://') //url.split('://', 2)
+        let urlparts = strdivide(url, '://')
         let linkref = knownschemas[urlparts[0]]
         if (linkref) {
           let Link = require(linkref)
           let link = new Link(index, url, opts)
-          this.addLink(link)
-          link.connect()
-        } else if (url.startsWith('ws://')) {
-          let Link = require('./itmplinkws')
-          let link = new Link(index, url, opts)
-          this.addLink(link)
-          link.connect()
-        } else if (url.startsWith('serial://')) {
-          let Link = require('./itmplinkserial')
-          let link = new Link(index, url, opts)
-          this.addLink(link)
+          this.addLink(index, link)
           link.connect()
         }
       }
@@ -899,6 +865,10 @@ please rewrite this
     return this
   }
 
+}
+
+itmpClient.serial = function (cfg) {
+  return new itmpClient(cfg)
 }
 
 module.exports = itmpClient

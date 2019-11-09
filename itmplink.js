@@ -1,14 +1,14 @@
 const EventEmitter = require('events')
 
 class itmplink extends EventEmitter {
-  constructor (name) {
+  constructor(purename, url) {
     super()
-    this.linkname = name
+    this.purename = purename // name without subaddress or full name if link without subaddresses at all
+    this.linkurl = url
+    this.cons = new Map()
 
     this.ready = false // link at message level coinnected
     this.connected = false // link at logic level connected
-
-    this.subscriptions = new Map() // map url to object
   }
   setready(ready = true) {
     this.ready = ready

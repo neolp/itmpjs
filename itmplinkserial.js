@@ -12,8 +12,8 @@ function tonumberifpossible(val) {
   return num
 }
 class ITMPSerialLink extends itmplink {
-  constructor(name, url, props) {
-    super(name)
+  constructor(purename, url, props) {
+    super(purename, url)
     const portprops = Object.assign({}, props)
     const parsedurl = new URL(url)
     parsedurl.searchParams.forEach((value, name) => {
@@ -104,7 +104,7 @@ class ITMPSerialLink extends itmplink {
         if (this.inpos > 2 && this.incrc === 0 /* this.inbuf[this.inpos-1] */) {
           const addr = this.inbuf[0]
           const msg = cbor.decode(this.inbuf.slice(1, this.inpos - 1))
-          this.emit('message', this, addr, msg)
+          this.emit('message', this, `${this.purename}~${addr}`, msg)
           this.nexttransaction()
         }
         this.lastchar = 0
@@ -146,8 +146,9 @@ class ITMPSerialLink extends itmplink {
     this.nexttransaction()
   }
 
-  send(addr, msg) {
+  send(fulladdr, msg) {
     const binmsg = cbor.encode(msg)
+    let addr = +fulladdr.substring(fulladdr.indexOf('~') + 1)
 
     return new Promise((resolve, reject) => {
       if (this.busy) {

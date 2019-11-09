@@ -4,7 +4,7 @@ const WebSocket = require('ws')
 
 class ITMPWsLink extends itmplink {
   constructor(name, url, props) {
-    super(name)
+    super(name, url)
     if (props === undefined) props = {}
     this.url = url
     this.binary = props.binary !== undefined ? props.binary : true

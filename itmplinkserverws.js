@@ -1,11 +1,12 @@
+/* eslint-disable no-console */
 const EventEmitter = require('events')
 const url = require('url')
 const itmplink = require('./itmplink')
 const cbor = require('cbor-sync')
 
 class ITMPWsServerLink extends itmplink {
-  constructor(name, itmp, ws) {
-    super(name)
+  constructor(purename, itmp, ws) {
+    super(purename, purename)
     this.itmp = itmp
     this.ws = ws
     this.msgqueue = []
@@ -25,9 +26,7 @@ class ITMPWsServerLink extends itmplink {
       } else {
         msg = cbor.decode(message)
       }
-      that.emit('message', that, undefined, msg)
-      //console.log(msg)
-      //if (typeof this.itmp.process === 'function') {  this.itmp.process(this, addr, msg)  }
+      that.emit('message', that, purename, msg)
     })
     this.ws.on('open', () => {
       this.ready = true // port opened flag
@@ -46,9 +45,9 @@ class ITMPWsServerLink extends itmplink {
       that.emit('disconnect', that)
       clearInterval(this.interval)
       this.interval = undefined
-      console.log('closed ', name, code, reason)
+      console.log('closed ', purename, code, reason)
       this.ready = false
-      this.itmp.deleteConnection(this.linkname)
+      this.itmp.deleteLink(this.purename)
     })
     this.interval = setInterval(() => {
       if (this.isAlive === false) {
@@ -58,6 +57,7 @@ class ITMPWsServerLink extends itmplink {
       try {
         this.ws.ping(() => { })
       } catch (er) {
+        this.isAlive = false
       }
     }, 30000)
 
@@ -77,14 +77,16 @@ class ITMPWsServerLink extends itmplink {
           this.ws.send(cmsg, () => {
             resolve()
           })
-          this.sendlevel = this.ws._sender.queue.length
-          this.sendamount = this.ws._sender.bufferedBytes
+          //this.sendlevel = this.ws._sender.queue.length
+          //this.sendamount = this.ws._sender.bufferedBytes
           //console.log(123456)
         }
-        catch (err) { }
+        catch (err) {
+          reject()
+        }
       }
       else {
-        this.msgqueue.push([addr, binmsg, resolve, reject])
+        //this.msgqueue.push([addr, binmsg, resolve, reject])
       }
     })
   }
@@ -122,13 +124,10 @@ class ITMPWsServer extends EventEmitter {
     }
 
     this.app.ws(path, (ws, req) => {
-      let link
-      if (req.connection.remoteFamily === 'IPv6') {
-        link = new ITMPWsServerLink(`ws:[${req.connection.remoteAddress}]:${req.connection.remotePort}`, this.itmp, ws)
-      } else {
-        link = new ITMPWsServerLink(`ws:${req.connection.remoteAddress}:${req.connection.remotePort}`, this.itmp, ws)
-      }
-      itmp.addLink(link)
+      let name = req.connection.remoteFamily === 'IPv6' ? `[${req.connection.remoteAddress}]` : req.connection.remoteAddress
+      let purename = `ws:${name}:${req.connection.remotePort}`
+      let link = new ITMPWsServerLink(purename, this.itmp, ws)
+      itmp.addLink(purename, link)
       //console.log(`connected ws:[${req.connection.remoteAddress}]:${req.connection.remotePort}`)
     })
   }
