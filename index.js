@@ -630,7 +630,7 @@ class itmpClient extends EventEmitter {
     let con = this.cons.get(addr)
     if (con) {
       const id = this.msgid++
-      return con.link.send(addr, [13, id, topic, msg, opts])
+      return con.link.send(addr, opts ? [13, id, topic, msg, opts] : [13, id, topic, msg])
     }
     return Promise.reject('wrong addr')
   }
