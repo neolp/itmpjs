@@ -191,7 +191,11 @@ class itmpClient extends EventEmitter {
     const listenername = listener.listenername
     this.listeners.set(listenername, listener)
   }
-
+  getLinkByURL(url) {
+    this.links.forEach((val) => {
+      if (val.linkurl === url) return val
+    })
+  }
   setGeneralCall(call) {
     this.gencall = call
   }
