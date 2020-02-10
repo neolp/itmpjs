@@ -8,8 +8,9 @@ var ITMP = require('../')
 var minimist = require('minimist')
 
 async function send(args) {
-  var client = new ITMP()
-  var link = client.connect(args.link)
+  var client = itmp.connect(args.link)
+  // var client = new ITMP()
+  // var link = client.connect(args.link)
   console.log('connect')
   client.on(client.$connected, function () {
     console.log('connected')
@@ -17,16 +18,16 @@ async function send(args) {
     if (!args.parameters) args.parameters = []
     client.call(link + '~' + args.address, args.topic, args.parameters, []).then((err) => { //args.parameters
       console.log(JSON.stringify(err))
-      client.deleteConnection(link)
+      client.stop()
       //client.end()
     }).catch((err) => {
       console.warn(err)
-      client.deleteConnection(link)
+      client.stop()
     })
   })
   client.on(client.$error, function (err) {
     console.warn(err)
-    client.deleteConnection(link)
+    client.stop()
   })
 }
 

@@ -1,15 +1,21 @@
 const EventEmitter = require('events')
+const UIDGenerator = require('uid-generator')
+const uidgen = new UIDGenerator() // Default is a 128-bit UID encoded in base58
+const npmpackegeversion = require('./package.json').version
 
-var defaultConnectOptions = {
+const defaultConnectOptions = {
   keepalive: 60,
   protocolId: 'ws',
   reconnectPeriod: 1000,
   connectTimeout: 30 * 1000,
   resubscribe: true
 }
-
-function extractpurename(name) {
-  return name.split('~')[0]
+const defaultServerOptions = {
+  keepalive: 60,
+  protocolId: 'ws',
+  reconnectPeriod: 1000,
+  connectTimeout: 30 * 1000,
+  resubscribe: true
 }
 // itmp error codes and its descriptions
 var errors = {
@@ -43,187 +49,149 @@ var errors = {
 }
 
 const knownschemas = {
-  ws: './itmplinkws',
-  serial: './itmplinkserial'
-}
-
-function strdivide(str, divider) {
-  let pos = str.indexOf(divider)
-  if (pos < 0) return [str, '']
-  return [str.substring(0, pos), str.substring(pos + divider.length)]
-
-  // itmp://com:1
-  // let delim = name.indexOf(':')
-  // if (delim < 0) return [this.connectors.get(name), undefined]
-  // return [this.connectors.get(name.substring(0, delim)), name.substring(delim + 1)]
-  //    let parts = name.split(':', 2)
-  //    return [this.connectors.get(parts[0]), parts[1]]
-
-}
-function strdivideend(str, divider) {
-  let pos = str.lastIndexOf(divider)
-  if (pos < 0) return [str, '']
-  return [str.substring(0, pos), str.substring(pos + divider.length)]
-}
-
-class itmpConnection {
-  constructor(name, link) {
-    this.subscriptions = new Map() // map url to object
-    this.link = link
-    this.name = name
-  }
+  ws: 'itmplinkws',
+  serial: 'itmplinkserial'
 }
 
 class itmpClient extends EventEmitter {
-  constructor(cfg) {
+  constructor(link, opts = {}) {
     super()
-    this.$connect = Symbol('connect') // event fired when client send message connect with connect parameters (event = {uri,opts,block:false})
-    this.$connected = Symbol('connected') // event fired wthen client fully connected (and resubscription was finished)
-    this.$disconnected = Symbol('disconnected') // event fired when client was disconnected
-    this.$subscribe = Symbol('subscribe') //  event fired when client subscribe for topic
-    this.$unsubscribe = Symbol('unsubscribe') //  event fired when client unsubscribe for topic
-    this.$message = Symbol('message')  //  event fired when client send an event
-    this.$error = Symbol('error')  //  event fired when client error
-    this.links = new Map() // handle all links without subaddress
-    this.cons = new Map() // handle all links together with subaddress
-    this.listeners = new Map() // handle all listeners for incoming connection
+    this.link = link // handle link
 
-    this.urls = new Map() // handle all internal urls
     this.msgid = 0 // msg number incremental for transction sequencing
     this.transactions = new Map() // handle unfinished transactions
-    this.localsubscriptions = new Map() // handle subscription from local subscribers (programmaticaly subscribed)
-    this.localsubscriptionsid = 1 // index of subscription for local subscribers (programmaticaly subscribed)
-    this.errors = errors // handle error codes and their descriptions
+    this.remotesubscriptions = new Map()
 
-    // then add/remove listeners subscribe/unsubscribe for that events 
-    // TODO refactor this
-    this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
+    this.resubscribe = opts.resubscribe !== undefined ? opts.resubscribe : true
+
+    this.role = opts.role ? opts.role : 'client' // role determine who send first message for login client send first message, server wait for message, node connects without login
+    this.realm = opts.realm ? opts.realm : 'itmp client' // realm describes what is it, it can de user, robot, proxy, .... - main function
+    this.token = opts.token ? opts.token : ''
+    this.uid = opts.uid ? opts.uid : uidgen.generateSync()
+    this.loginState = 0 // 0 - waiting for login
+    this.nonce = uidgen.generateSync()
+
+    this.on('newListener', (eventName, listener) => { // when subscribe new listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
-        this._subscribe(eventName)
+        if (this.loginState > 1)
+          this._subscribe(eventName).catch((err) => {
+            console.log('external subscribe error')
+          })
       }
     })
-    this.on('removeListener', (eventName) => { // when unsubscribe the listener (it is from 'events' interface)
+    this.on('removeListener', (eventName, listener) => { // when unsubscribe the listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
-        this._unsubscribe(eventName)
+        if (this.loginState > 1)
+          this._unsubscribe(eventName)
       }
     })
-    //configure connections
-    if (typeof cfg === 'object') {
-      if (cfg.connect) {
-        this.connect(cfg.connect)
-      }
-      if (cfg.listen) {
-        this.listen(cfg.listen)
-      }
-    }
-  }
 
-  unsubscribeCon(con) {
-    con.subscriptions.forEach((val, uri) => {
-      if (val.unsubscribe) {
-        val.unsubscribe(uri, null, val)
+    link.on('connect', () => { // then link connected (become active) send initial CONNECT message and then got answer make link connected
+      if (this.role === 'client') { // we need to login // send authentification data
+        this.transaction([0, 0, this.realm, { uid: this.uid, name: link.name, nonce: this.nonce, token: this.token, var: npmpackegeversion }], 3000).then(([rrealm, ropts]) => {
+          if (ropts === undefined || typeof ropts !== 'object') ropts = {}
+          let event = Object.assign({}, ropts, { rrealm, name: link.name, block: false })
+          this.emit(this.$loggedin, event)
+          if (event.block) {
+            console.log('got connect BLOCK => Stopeed', event)
+            this.close()
+            this.loginState = 0 // NOT connected
+            this.emit(this.$disconnected, link.name)
+          } else {
+            console.log('got connect restore subscriptions')
+            this.loginState = 2 // connected
+            this.emit(this.$connected, event)
+            this._resubscribe()
+          }
+        }).catch((err) => {
+          console.log('login rejected ', err)
+          this.close()
+          this.loginState = 0 // NOT connected
+          this.emit(this.$disconnected, link.name)
+        })
+      } else if (this.role === 'server') {
+        console.log('server connect')
+        this.loginState = 1 // Semi connected
+        // do nothing but no one can send message until login
+      } else { //allow connection without login
+        this.loginState = 3 // connected without login
       }
-      this.emit(this.$unsubscribe, uri, val.addr)
     })
-    con.subscriptions.clear()
-
-  }
-
-
-  // add new link (new connection)
-  addLink(linkname, link) {
-    //const purename = extractpurename(linkname)
-    this.links.set(linkname, link)
-    //let con = this.addCon(linkname)
-    link.on('connect', async () => { // then link connected (become active) send initial CONNECT message and then got answer make link connected
-      //      if (link.isconnected()) {
-      this.emit(this.$connected, linkname)
-      //   return
-      // }
-      // this.transactionCon(con, undefined, [0, 0, ''], 30000).then(() => {
-      //   this.emit(this.$connected, linkname)
-      // }).catch((err) => {
-      //   //TODO we should do something else
-      //   this.emit(this.$connected, linkname, err)
-      // })
-    })
-    link.on('disconnect', () => { // then link disconnected unsubscribe all topics from that link
-      link.cons.forEach((con) => {
-        this.unsubscribeCon(con)
+    link.on('disconnect', () => { // then link disconnected unsubscribe all topics from thet link
+      this.remotesubscriptions.forEach((val, uri) => {
+        if (val.unsubscribe) {
+          val.unsubscribe(uri, null, val)
+        }
+        this.emit(this.$unsubscribe, uri, val.addr)
       })
-      this.emit(this.$disconnected, linkname)
+      this.remotesubscriptions.clear()
+      this.loginState = 0 // NOT connected
+      this.emit(this.$disconnected)
     })
-    link.on('message', (link, addr, msg) => {
+    link.on('message', (msg) => {
       //      console.log('income message',JSON.stringify(msg))
-
-      let con = this.getConection(addr)
-      if (con)
-        this.process(con, addr, msg)
+      this.process(msg)
     })
   }
 
-  deleteLink(name) {
-    let link = this.links.get(name)
-    link.cons.forEach((con, conname) => {
-      this.unsubscribeCon(con)
-      this.cons.delete(conname)
-    })
-    link.cons.clear()
-    this.links.delete(name)
-    link.removeAllListeners('connect')
-    link.removeAllListeners('disconnect')
-    link.removeAllListeners('message')
-    link.stop()
-  }
-
-  deleteConnection(name) {
-    let con = this.cons.get(name)
-    this.unsubscribeCon(con)
-    this.cons.delete(name)
-    con.link.cons.delete(name)
-    if (con.link.cons.length === 0) {
-      this.deleteLink(con.link.purename)
-    }
-  }
-
-
-  addListener(listener) {
-    const listenername = listener.listenername
-    this.listeners.set(listenername, listener)
-  }
-  getLinkByURL(url) {
-    this.links.forEach((val) => {
-      if (val.linkurl === url) return val
-    })
-  }
   setGeneralCall(call) {
     this.gencall = call
   }
 
-  processConnect(con, addr, id, payload) {
-    let [uri, opts] = payload
+  stop() {
+    // remove incoming subscriptions
+    this.remotesubscriptions.forEach((val, uri) => {
+      if (val.unsubscribe) {
+        val.unsubscribe(uri, null, val)
+      }
+      this.emit(this.$unsubscribe, uri, val)
+    })
+    this.remotesubscriptions.clear()
+    this.link.removeAllListeners('connect')
+    this.link.removeAllListeners('disconnect')
+    this.link.removeAllListeners('message')
+    this.link.stop()
+    //    this.link = null //??
+  }
+
+  close() {
+    // remove incoming subscriptions
+    this.remotesubscriptions.forEach((val, uri) => {
+      if (val.unsubscribe) {
+        val.unsubscribe(uri, null, val)
+      }
+      this.emit(this.$unsubscribe, uri, val)
+    })
+    this.remotesubscriptions.clear()
+    this.link.close()
+  }
+
+  processConnect(id, payload) { // remote end wants to login to us
+    let [realm, opts] = payload
     if (opts === undefined || typeof opts !== 'object') opts = {}
-    let event = { uri, opts, block: false }
-    this.emit(this.$connect, event)
+    let event = Object.assign({}, opts, { realm, block: false })
+    this.emit(this.$login, event)
     if (event.block) {
-      this.answer(addr, [5, id, event.blockcode ? event.blockcode : 403, event.blockreason ? event.blockreason : 'forbidden'])
+      console.log('got connect BLOCK', JSON.stringify(event))
+      this.answer([5, id, event.blockcode ? event.blockcode : 403, event.blockreason ? event.blockreason : 'forbidden'])
+      this.loginState = 0 // NOT connected
+      this.close()
     } else {
       console.log('got connect restore subscriptions')
-      this._resubscribe(con, undefined).then(() => {
-        console.log('reconnected')
-        this.answer(addr, [1, id, 'ok'])
-      })
+      this.loginState = 2 // connected
+      this.answer([1, id, this.realm, { uid: this.uid, nonce: this.nonce, name: this.name, token: this.token, var: npmpackegeversion }])
+      this._resubscribe()
     }
   }
 
-  processConnected(con, addr, key, payload) {
+  processConnected(key, payload) {
     // this.processConnect()
     const t = this.transactions.get(key)
     if (t !== undefined) {
       clearTimeout(t.timeout)
       this.transactions.delete(key)
-      const [code, message] = payload
-      t.resolve([code, message])
+      const [realm, opts] = payload
+      t.resolve([realm, opts])
       // if (t.err !== undefined) {
       //   t.err(code, message)
       // }
@@ -244,42 +212,33 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processCall(con, addr, id, payload) {
+  processCall(id, payload) {
     const [uri, args, opts] = payload
-    if (this.urls.has(uri)) {
-      let node = this.urls.get(uri)
-      if (node.call) {
-        node.call(uri, args, opts).
-          then((ret) => {
-            this.answer(addr, [9, id, ret])
-          }).
-          catch((err) => {
-            if (err.code) {
-              this.answer(addr, [5, id, err.code, err.message])
-            } else {
-              this.answer(addr, [5, id, 500, 'internal error'])
-            }
-          })
-      } else {
-        this.answer(addr, [5, id, 501, 'no call for this node'])
-      }
-    } else if (this.gencall) {
+    if (this.gencall) {
       this.gencall(uri, args, opts).
         then((ret) => {
-          this.answer(addr, [9, id, ret])
+          this.answer([9, id, ret])
         }).
         catch((err) => {
           if (err.code) {
-            this.answer(addr, [5, id, err.code, err.message])
+            this.answer([5, id, err.code, err.message])
           } else {
-            this.answer(addr, [5, id, 500, 'internal error'])
+            this.answer([5, id, 500, 'internal error'])
           }
         })
     } else {
-      this.answer(addr, [5, id, 404, 'no such call'])
+      this.answer([5, id, 404, 'no such call'])
     }
   }
 
+  finishtransaction(key) {
+    const t = this.transactions.get(key)
+    if (t !== undefined) {
+      clearTimeout(t.timeout)
+      this.transactions.delete(key)
+    }
+    return t
+  }
   processResult(key, payload) {
     const t = this.transactions.get(key)
     if (t !== undefined) {
@@ -293,107 +252,107 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processEvent(con, addr, payload) {
+  processEvent(payload) {
     // console.log("event",msg);
     const [topicName, args, opts] = payload
-    let node = this.localsubscriptions.get(topicName)
-    if (node && node.onMessage) {
-      node.lastMessage = { topic: topicName, args, opts, con, addr }
-      node.onMessage(topicName, args, opts)
-    }
+    // let node = this.localsubscriptions.get(topicName)
+    // if (node && node.onMessage) {
+    //   node.lastMessage = { topic: topicName, args, opts, link: this }
+    //   node.onMessage(topicName, args, opts)
+    // }
     if (Array.isArray(args)) {
-      this.emit(this.$message, con, addr, topicName, args, opts)
+      this.emit(this.$message, this, topicName, args, opts)
       this.emit(topicName, ...args, opts)
     } else {
-      this.emit(this.$message, con, addr, topicName, args, opts)
+      this.emit(this.$message, this, topicName, args, opts)
       this.emit(topicName, args, opts)
     }
-    //this.model.processIncomeEvent(con.connected ? `${con.connected.con}/${topic}` : `${addr}/${topic}`, args, ots)
+    //this.model.processIncomeEvent(link.connected ? `${link.connected.link}/${topic}` : `${addr}/${topic}`, args, ots)
   }
 
-  processPublish(con, addr, id, payload) {
+  processPublish(id, payload) {
     // console.log("event",msg);
     const [topicName, args, opts] = payload
-    let node = this.localsubscriptions.get(topicName)
-    if (node && node.onMessage) {
-      node.lastMessage = { topic: topicName, args, opts, con, addr }
-      node.onMessage(topicName, args, opts)
-    }
+    // let node = this.localsubscriptions.get(topicName)
+    // if (node && node.onMessage) {
+    //   node.lastMessage = { topic: topicName, args, opts, link: this }
+    //   node.onMessage(topicName, args, opts)
+    // }
     if (Array.isArray(args)) {
-      this.emit(this.$message, con, addr, topicName, args, opts)
+      this.emit(this.$message, this, topicName, args, opts)
       this.emit(topicName, ...args, opts)
     } else {
-      this.emit(this.$message, con, addr, topicName, args, opts)
+      this.emit(this.$message, this, topicName, args, opts)
       this.emit(topicName, args, opts)
     }
-    this.answer(addr, [15, id])
+    this.answer([15, id])
   }
 
-  processSubscribe(con, addr, id, payload) {
+  processSubscribe(id, payload) {
     const [originaluri, opts] = payload
     let uri
-    if (con.connected) {
-      //console.log('linked subscribe', addr, ' for ', originaluri)
-      uri = `area${con.connected.con}/${originaluri}`
-    } else {
-      uri = originaluri
-    }
+    //    if (link.connected) {
+    //console.log('linked subscribe', addr, ' for ', originaluri)
+    //      uri = `area${link.connected.link}/${originaluri}`
+    //    } else {
+    uri = originaluri
+    //    }
     //console.log('subscribe', addr, ' for ', uri)
 
-    if (!con.subscriptions.has(originaluri)) {
-      const s = { con, addr/*, emit:this.emitEvent.bind(this)*/ }
+    if (!this.remotesubscriptions.has(originaluri)) {
+      const s = {}
       //const ret = this.model.subscribe(uri, opts, s)
       //if (ret === undefined) {
       //console.log(`fault subs${JSON.stringify(payload)}`)
       //this.answer(addr, [5, id, 404, 'no such uri'])
       //} else {
       if (typeof originaluri === 'string' && originaluri.length > 0) {
-        con.subscriptions.set(originaluri, s)
+        this.remotesubscriptions.set(originaluri, s)
         try {
-          this.emit(this.$subscribe, originaluri, addr, opts)
-          this.answer(addr, [17, id])
+          this.emit(this.$subscribe, originaluri, opts)
+          this.answer([17, id])
         } catch (err) {
-          this.answer(addr, [5, id, 500, err.message])
+          this.answer([5, id, 500, err.message])
         }
       } else {
-        this.answer(addr, [5, id, 400, 'wrong topic'])
+        this.answer([5, id, 400, 'wrong topic'])
       }
 
       //}
     } else {
-      this.answer(addr, [5, id, 409, 'already subscribed'])
+      this.answer([5, id, 409, 'already subscribed'])
     }
   }
-  processUnsubscribe(con, addr, id, payload) {
+  processUnsubscribe(id, payload) {
     const [uri, opts] = payload
     //console.log('unsubscribe', addr, ' at ', uri)
-    const s = con.subscriptions.get(uri)
+    const s = this.remotesubscriptions.get(uri)
     if (s !== undefined) {
       let ret
       if (s.unsubscribe) {
         ret = s.unsubscribe(uri, opts, s)
       }
-      con.subscriptions.delete(uri)
-      this.answer(addr, [19, id, ret])
-      this.emit(this.$unsubscribe, uri, addr, opts)
+      this.remotesubscriptions.delete(uri)
+      this.answer([19, id, ret])
+      this.emit(this.$unsubscribe, uri, opts)
     } else {
-      console.log(`unexpected subs${JSON.stringify(payload)}`)
-      this.answer(addr, [5, id, 404, 'no such uri'])
+      console.log(`unexpected unsubs${JSON.stringify(payload)}`)
+      this.answer([5, id, 404, 'no such uri'])
     }
   }
 
-  processDescribe(addr, id, payload) {
+  processDescribe(id, payload) {
     const [uri, args, opts] = payload
     let ret = this.model.describe(uri, opts)
     if (ret !== undefined) {
-      this.answer(addr, [7, id, ret])
+      this.answer([7, id, ret])
     } else {
       console.log(`unexpected descr${JSON.stringify(payload)}`)
-      this.answer(addr, [5, id, 404, 'no such uri'])
+      this.answer([5, id, 404, 'no such uri'])
     }
   }
 
-  processSubscribed(con, addr, key, payload) {
+  processSubscribed(key, payload) {
     const t = this.transactions.get(key)
     if (t !== undefined) {
       this.transactions.delete(key)
@@ -404,7 +363,7 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  processUnsubscribed(con, addr, key, payload) {
+  processUnsubscribed(key, payload) {
     const t = this.transactions.get(key)
     if (t !== undefined) {
       clearTimeout(t.timeout)
@@ -416,103 +375,94 @@ class itmpClient extends EventEmitter {
     }
   }
 
-  process(con, addr, msg) {
+  process(msg) {
+    //      addr = link.linkname
+    //      addr = `${link.linkname}#${addr}`
     if (Array.isArray(msg) && msg.length >= 1 && typeof msg[0] === 'number') {
       let [command, ...payload] = msg
-      let key
-      let id
-      if (msg.length >= 1 && typeof msg[1] === 'number') {
-        [id, ...payload] = payload
-        key = `${addr}:${id}`
-      } else {
-        key = `${addr}:`
-        id = ''
-      }
+      let id;
+      [id, ...payload] = payload
+
+      // if (this.loginState < 2 && command > 5) {// NOT connected
+      //   this.answer([5, id, 403, 'forbidden before login'])
+      //   return
+      // }
 
       switch (command) {
-      case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
-        this.processConnect(con, addr, id, payload)
-        break
-      case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
-        this.processConnected(con, addr, key, payload)
-        break
-      case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
-      case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
-      case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
-        this.processError(key, payload)
-        break
-      case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
-        this.processDescribe(addr, id, payload)
-        break
-      case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
-        this.processResult(key, payload)
-        break
+        case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
+          this.processConnect(id, payload)
+          break
+        case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
+          this.processConnected(id, payload)
+          break
+        case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
+        case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
+        case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
+          this.processError(id, payload)
+          break
+        case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
+          this.processDescribe(id, payload)
+          break
+        case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
+          this.processResult(id, payload)
+          break
         // RPC -----------------------------
-      case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
-        this.processCall(con, addr, id, payload)
-        break
-      case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
-        this.processResult(key, payload)
-        break
+        case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
+          this.processCall(id, payload)
+          break
+        case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
+          this.processResult(id, payload)
+          break
         // RPC Extended
-      case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
-        //  additional arguments for call
-        break
-      case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
-        //  call in progress
-        break
-      case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
-        // publish
-        break
+        case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
+          //  additional arguments for call
+          break
+        case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
+          //  call in progress
+          break
+        case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
+          // publish
+          break
         // events and sub/pub ---------------------
-      case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
-        this.processEvent(con, addr, payload)
-        break
-      case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
-        this.processPublish(con, addr, id, payload)
-        //console.log('publish', msg)
-        break
-      case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
-        //console.log('published', msg)
-        this.processResult(key, payload)
-        break
+        case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
+          this.processEvent(payload)
+          break
+        case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
+          this.processPublish(id, payload)
+          //console.log('publish', msg)
+          break
+        case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
+          //console.log('published', msg)
+          this.processResult(id, payload)
+          break
         // subscribe
-      case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
-        this.processSubscribe(con, addr, id, payload)
-        break
-      case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
-        this.processSubscribed(con, addr, key, payload)
-        break
-      case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
-        this.processUnsubscribe(con, addr, id, payload)
-        break
-      case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
-        this.processUnsubscribed(con, addr, key, payload)
-        break
+        case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
+          this.processSubscribe(id, payload)
+          break
+        case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
+          this.processSubscribed(id, payload)
+          break
+        case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
+          this.processUnsubscribe(id, payload)
+          break
+        case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
+          this.processUnsubscribed(id, payload)
+          break
         // keep alive
-      case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
-      case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
-      default:
+        case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
+        case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
+        default:
       }
     } else {
       console.log('wrong message ', msg)
     }
   }
 
-  answer(addr, msg) {
-    const con = this.cons.get(addr)
-    if (!con) {
-      throw new Error('no link')
-    }
-    con.link.send(addr, msg)
+  answer(msg) {
+    this.link.send(msg)
   }
 
-  transactionCon(con, addr, msg, timeout = 600) {
-    if (typeof con !== 'object') {
-      return Promise.reject(new Error('500 no such link'))
-    }
-
-    // TODO move transactions keys to con
+  transaction(msg, timeout = 600) {
     var that = this
     if (typeof msg[1] === 'number') {
       this.msgid++
@@ -524,11 +474,15 @@ class itmpClient extends EventEmitter {
       }
       msg[1] = this.msgid
     } else {
-      return Promise.reject(new Error('500 wrong message')) //console.log('wrong message')
+      console.log('wrong message')
     }
 
-    /* let sent = */ con.link.send(addr, msg)
-    const key = `${addr}:${msg[1]}`
+    const key = msg[1]
+    /* let sent = */ this.link.send(msg).catch((err) => {
+      let t = this.finishtransaction(key)
+      if (t) t.reject(new Error(err))
+    })
+
     return new Promise((resolve, reject) => {
       const timerId = setTimeout((tkey) => {
         that.transactions.delete(tkey)
@@ -538,32 +492,13 @@ class itmpClient extends EventEmitter {
     })
   }
 
-  getConection(addr) {
-    let con = this.cons.get(addr)
-    if (con) return con
-    let link = this.links.get(extractpurename(addr))
-    if (!link) return undefined
-    con = new itmpConnection(addr, link)
-    link.cons.set(addr, con)
-    this.cons.set(addr, con)
-    return con
-  }
-  transaction(addr, msg, timeout = 600) {
-    let con = this.getConection(addr)
-    if (!con) {
-      if (!con)
-        return Promise.reject(new Error('no such link'))
-    }
-    return this.transactionCon(con, addr, msg, timeout)
-  }
-
-  _resubscribe(con, subaddr) {
+  _resubscribe() {
+    if (!this.resubscribe) return Promise.resolve()
     const that = this
-    //    return this.transactionLink(con, subaddr, [0,0,'']).then(()=>{
     const rets = []
     that.eventNames().forEach((topicName) => {
       if (typeof topicName === 'string' && topicName !== 'newListener' && topicName !== 'removeListener') {
-        rets.push(that.transactionCon(con, subaddr, [16, 0, topicName]))
+        rets.push(that.transaction([16, 0, topicName]).then(() => { console.log('resubscribed', topicName) }).catch(() => { console.log('failed resubscribed', topicName) }))
       }
 
     })
@@ -572,210 +507,48 @@ class itmpClient extends EventEmitter {
     })
     //    })
   }
-  /*
-  // TODO
-  // rewrite this to use sub paths
-  emitEvent (addr, topic, msg) {
-    this.links.forEach((link, key, map) => {
-      const to = link.subscriptions.get(topic)
-      if (to) {
-        const [link, subaddr] = this.getLink(to.addr) // link, subaddr, uri = ''
-        if (typeof link === 'object') {
-          const id = this.msgid++
-          link.send(subaddr, [13, id, topic, msg])
-        }
-      }
-    })
-  }
-
-  sendEvent (addr, topic, msg) {
-    const [link, subaddr] = this.getLink(addr) // link, subaddr, uri = ''
-    if (typeof link === 'object') {
-      const id = this.msgid++
-      link.send(subaddr, [13, id, topic, msg])
-    }
-  }
-*/
-  getLink(addr) {
-    if (!addr) {
-      if (this.links.length === 1) {
-        let lnk = this.links.values().next().value
-        return [lnk, '']
-      }
-    }
-    const [linkname, subaddr] = strdivideend(addr, '~') //addr.split(':', 2)
-    const link = this.links.get(linkname)
-
-    return [link, subaddr]
-  }
 
   // publish('reset')
   // publish('setspeed',[12,45])
-  // publish('com/4','alarm')
-  // publish('com/4','speed',[12,45])
-  publishEvent(addr, topic, message, opts) {
-    if (typeof addr === 'object' && addr !== null) {
-      message = addr.message
-      topic = addr.topic
-      addr = addr.address
-    } else if (arguments.length < 4 && typeof topic !== 'string') { // no address at all
-      opts = message
-      message = topic
-      topic = addr
-      addr = undefined
-    }
-    const msg = [14, 0, topic, message, opts] // 14 - publish message, 15 - published message
-    return this.transaction(addr, msg)
+  publish(topic, message, opts) {
+    if (opts) return this.transaction([14, 0, topic, message, opts]) // 14 - publish message, 15 - published message
+    return this.transaction([14, 0, topic, message])
   }
 
-  // sendEvent('com/4','reset',[12,45])
-  // sendEvent('com/4','setspeed',[12,45])
-  sendEvent(addr, topic, msg, opts) {
-    let con = this.cons.get(addr)
-    if (con) {
-      const id = this.msgid++
-      return con.link.send(addr, opts ? [13, id, topic, msg, opts] : [13, id, topic, msg])
-    }
-    return Promise.reject('wrong addr')
+  // sendEvent('reset',[12,45])
+  sendEvent(topic, msg) {
+    const id = this.msgid++
+    return this.link.send([13, id, topic, msg])
   }
 
-  // publish('speed',[12,45])
-  sendEventAllSubscribed(topic, msg) {
-    this.cons.forEach((con, key, map) => {
-      const to = con.subscriptions.get(topic)
-      if (to) {
-        const id = this.msgid++
-        con.con.send(to ? to.subaddr : undefined, [13, id, topic, msg])
-      }
-    })
-  }
-
-  // call('com/4','reset')
-  // call('com/4','setspeed',[12,45])
-  call(addr, name, args) {
-    return this.transaction(addr, [8, 0, name, args])
+  // call('reset')
+  // call('setspeed',[12,45])
+  call(name, args, opts) {
+    if (opts) return this.transaction([8, 0, name, args, opts])
+    return this.transaction([8, 0, name, args])
   }
 
   // subscribe('topic')
-  // subscribe('topic', (msg)=>{} )
   // subscribe('topic', {retain:'dead'} )
-  // subscribe('topic', {retain:'dead'}, (msg)=>{} )
-  // subscribe('address', 'topic')  subscribe for topic from specific con
-  // subscribe('address', 'topic', (msg)=>{})
-  // subscribe('address', 'topic', {retain:'dead'})
-  // subscribe('address', 'topic', {retain:'dead'}, (msg)=>{})
-  _subscribe(addr, topicName, params, onevent) {
-    if (typeof addr === 'object' && addr !== null) {
-      topicName = addr.topic
-      params = addr.parameters
-      onevent = addr.onevent
-      addr = addr.address
-    } else {
-      if (typeof topicName !== 'string') { // no address at all (1,2,3,4)
-        onevent = params
-        params = topicName
-        topicName = addr
-        addr = undefined
-      }
-      if (typeof params === 'function') {
-        onevent = params
-        params = undefined
-      }
-    }
-    /*
-    if (this.localsubscriptions.has(topicName)){
-      let s = this.localsubscriptions.get(topicName)
-      if (s.handlers.has(onevent)) {
-        s.handlers.get(onevent).count += 1 // increment subscribers number
-      } else {
-        s.handlers.set(onevent, {count:1})
-      }
-      return Promise.resolve()
-    } else {
-      let handlers = new Map()
-      handlers.set(onevent, {count:1})
-      this.localsubscriptions.set(topicName, { addr, topic: topicName, handlers })//`${addr}/${topic}`
-      */
-    const rets = []
+  // subscribe('topic', {retain:'dead'} )
+  _subscribe(topicName, params) {
     const msg = [16, 0, topicName, params]
-    this.links.forEach((lnk) => {
-      if (lnk.ready)
-        rets.push(this.transactionLink(lnk, undefined, msg))
-    })
-    if (rets.length > 0) {
-      return Promise.all(rets).catch(() => {
-        console.log('subscribe error')
-      })
-    } else {
-      return Promise.resolve()
-    }
-    //}
+    return this.transaction(msg)
   }
 
   // unsubscribe('topic')
-  // unsubscribe('address', 'topic')  unsubscribe from topic from specific con
-  _unsubscribe(addr, topicName) {
-    if (typeof addr === 'object' && addr !== null) {
-      topicName = addr.topic
-      addr = addr.address
-    } else {
-      if (typeof topicName !== 'string') { // no address at all (1,2,3,4)
-        topicName = addr
-        addr = undefined
-      }
-    }
-    /*
-    if (this.localsubscriptions.has(topicName)){
-      let s = this.localsubscriptions.get(topicName)
-      if (s.handlers.has(onevent)) {
-        s.handlers.get(onevent).count += 1 // increment subscribers number
-      } else {
-        s.handlers.set(onevent, {count:1})
-      }
-      return Promise.resolve()
-    } else {
-      let handlers = new Map()
-      handlers.set(onevent, {count:1})
-      this.localsubscriptions.set(topicName, { addr, topic: topicName, handlers })//`${addr}/${topic}`
-      */
-    const rets = []
+  _unsubscribe(topicName) {
     const msg = [18, 0, topicName]
-    this.links.forEach((lnk) => {
-      if (lnk.ready)
-        rets.push(this.transactionLink(lnk, undefined, msg))
-    })
-    if (rets.length > 0) {
-      return Promise.all(rets).catch(() => {
-        console.log('unsubscribe error')
-      })
-    } else {
-      return Promise.resolve()
-    }
-    //return this.transaction(addr, msg).then( ()=>{ return id } )
-
-    //    const msg = [18, 0, topic, param]
-    //return this.transaction(addr, msg)
+    return this.transaction(msg)
   }
 
   // describe('topic')
   // describe('address', 'topic')
-  describe(addr, topic) {
-    if (typeof addr === 'object' && addr !== null) {
-      topic = addr.topic
-      addr = addr.address
-    } else if (typeof topic !== 'string') { // no address at all
-      topic = addr
-      addr = undefined
-    }
-
+  describe(topic) {
     const msg = [6, 0, topic]
-    return this.transaction(addr, msg)
+    return this.transaction(msg)
   }
 
-  describe(addr, name) {
-    const msg = [6, 0, name]
-    return this.transaction(addr, msg)
-  }
   /*
 
 please rewrite this
@@ -799,80 +572,68 @@ please rewrite this
     // err(404, 'subscription not found')
   }
 */
-  queueSize(addr) {
-    let subaddr = ''
-    let linkname = ''
-    if (typeof addr === 'string') {
-      const addrparts = strdivide(addr, '/') //addr.split('/', 2)
-      //TODO REFACTOR THIS
-      if (Array.isArray(addrparts)) {
-        linkname = addrparts[0]
-        subaddr = addrparts[1]
-      } else {
-        linkname = addr
-      }
-    }
-    const con = this.links.get(linkname)
-    if (typeof con !== 'object') {
-      return -1
-    }
-
-    return con.queueSize(subaddr)
+  queueSize() {
+    return link.queueSize()
   }
-
-  prepareLink(url) {
-    let urlparts = strdivide(url, '://')
-    const parsedurl = new URL(url)
-    let purename = extractpurename(parsedurl.host)
-    if (this.links.has(purename))
-      return
-
-    this.connect(url)
-  }
-  connect(urls, opts) {
-    opts = Object.assign({}, defaultConnectOptions, opts)
-    if (typeof urls === 'string') urls = [urls]
-    for (let index in urls) {
-      let url = urls[index]
-      if (typeof url === 'string') {
-        let urlparts = strdivide(url, '://')
-        let linkref = knownschemas[urlparts[0]]
-        if (linkref) {
-          let Link = require(linkref)
-          let link = new Link(index, url, opts)
-          this.addLink(index, link)
-          link.connect()
-        }
-      }
-    }
-    return this
-  }
-
-  listen(urls, opts) {
-    if (typeof urls === 'string') urls = [urls]
-    for (let index in urls) {
-      let url = urls[index]
-      if (typeof url === 'string') {
-        if (url.startsWith('ws://')) {
-          let Srv = require('./itmplinkserverws')
-          let srv = new Srv(this, url, opts)
-          this.addListener(srv)
-        }
-      } else {
-        if (index.startsWith('ws') || url.scheme.startsWith('ws')) {
-          let Srv = require('./itmplinkserverws')
-          let srv = new Srv(this, undefined, Object.assign({}, opts, url))
-          this.addListener(srv)
-        }
-      }
-    }
-    return this
-  }
-
 }
 
-itmpClient.serial = function (cfg) {
-  return new itmpClient(cfg)
+itmpClient.prototype.$login = Symbol('login') // event fired when remote peer wants to login to us with connect parameters (event = {uri,opts,block:false})
+itmpClient.prototype.$loggedin = Symbol('loggedin') // event fired when both end was agree to be logged in (event = {uri,opts})
+itmpClient.prototype.$connected = Symbol('connected') // event fired wthen client fully connected (and resubscription was finished)
+itmpClient.prototype.$disconnected = Symbol('disconnected') // event fired when client was disconnected
+itmpClient.prototype.$subscribe = Symbol('subscribe') //  event fired when client subscribe for topic
+itmpClient.prototype.$unsubscribe = Symbol('unsubscribe') //  event fired when client unsubscribe for topic
+itmpClient.prototype.$message = Symbol('message')  //  event fired when client send an event
+itmpClient.prototype.$error = Symbol('error')  //  event fired when client error
+
+
+// urls
+// itmp:ws://localhost:1884/ws
+// itmp:serial:///dev/usbtty0?
+// itmp:serial://COM9?baudRate=115200
+// itmp:serial://COM3?baudRate=115200~8
+// itmp:wssrv:///ws    expressapp: app
+// itmp:com~8
+
+
+function connection(url, opts) {
+  if (url.startsWith('itmp://')) url = url.substring(7)
+  else if (url.startsWith('itmp:')) url = url.substring(5)
+  else if (url.startsWith('itmp.')) url = url.substring(5)
+  opts = Object.assign({}, defaultConnectOptions, opts)
+  let urlparts = url.split('://', 2)
+  let linkref = knownschemas[urlparts[0]]
+  if (linkref) {
+    let Link = require(linkref)
+    let link = new Link(url, opts)
+    let con = new itmpClient(link, opts)
+    link.connect()
+    return con
+  }
+  return undefined
 }
 
-module.exports = itmpClient
+const Servers = new Map() // handle all listeners for incoming connection
+
+function createServer(url, opts, callback) {
+  if (url.startsWith('itmp://')) url = url.substring(7)
+  else if (url.startsWith('itmp:')) url = url.substring(5)
+  else if (url.startsWith('itmp.')) url = url.substring(5)
+  opts = Object.assign({}, defaultServerOptions, opts)
+  if (url.startsWith('ws://')) {
+    let Srv = require('itmplinkserverws')
+    opts.role = 'server'
+    let srv = new Srv(url, opts, (link) => {
+      let con = new itmpClient(link, opts)
+      con.once(con.$disconnected, () => {
+        //con.removeAllListeners(con.$disconnected)
+      })
+      callback(con)
+    })
+    Servers.set(srv.listenername, srv)
+    return srv
+  }
+  return undefined
+}
+
+module.exports = { createServer: createServer, connect: connection }

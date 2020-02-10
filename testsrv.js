@@ -1,130 +1,108 @@
-var itmp = require('./itmp4.js')
+var itmp = require('./index.js')
 
-var server = new itmp().listen({
-  //  mqtt: 'tcp://localhost:1883',
-  //  mqtts: 'ssl://localhost:8883',
-  mqttws: 'ws://localhost:1884/ws',
-  //  mqtwss: 'wss://localhost:8884'
-}, {/*
-  ssl: {
-    key: fs.readFileSync('./server.key'),
-    cert: fs.readFileSync('./server.crt')
-  },*/
-  emitEvents: true // default
-}, (client) => {
-  client.connack({
-    returnCode: 0
+
+var tmint
+
+let wsclient;
+const server = itmp.createServer('ws://localhost:1884/ws', {
+  role: 'server', // role determine who send first message for login client send first message, server wait for message, node connects without login
+  realm: 'test server', // realm describes what is it, it can de user, robot, proxy, .... - main function
+  token: 'supersecret',
+  uid: 'uid'
+}, (newclient) => {
+  //newclient.stop()
+  //return false;
+  wsclient = newclient
+
+  wsclient.on(wsclient.$login, function (login) {
+    console.log('srv login', JSON.stringify(login))
+    if (login.token != 'supersecret') {
+      login.block = true
+    }
   })
-}).connect({
-  com: 'serial://COM3?baudRate=115200&dataBits=8&stopBits=1&parity=none'
-  //  com:'serial:///dev/ttyS0?baudRate=115200&dataBits=8&stopBits=1&parity=none'
-  //  com2:'serial:///dev/ttyAMA0?baudRate=115200&dataBits=8&stopBits=1&parity=none'
-}, {/*
-    ssl: {
-      key: fs.readFileSync('./server.key'),
-      cert: fs.readFileSync('./server.crt')
-    },*/
-  emitEvents: true // default
-}, (client) => {
-  client.connack({
-    returnCode: 0
+
+  wsclient.on(wsclient.$connected, function (link) {
+    console.log('srv connected', link)
+    /*wsclient.subscribe('presence', function (err) {
+      if (!err) {
+        wsclient.publish('presence', 'Hello mqtt')
+      }
+    })*/
   })
-})
-/*
-server.listen(() => {
-  console.log('listening!')
-})
-*/
+
+
+  wsclient.on(wsclient.$disconnected, function (link) {
+    console.log('srv disconnect')
+    /*  wsclient.subscribe('presence', function (err) {
+        if (!err) {
+          wsclient.publish('presence', 'Hello mqtt')
+        }
+      })*/
+  })
+
+  wsclient.on(wsclient.$subscribe, (topic) => {
+    console.log('srv subscribe', topic)
+    if (topic === 'msg')
+      if (!tmint)
+        tmint = setInterval(tm, 1000)
+  })
+
+  wsclient.on(wsclient.$unsubscribe, (topic) => {
+    console.log('srv unsubscribe', topic)
+    if (topic === 'msg')
+      if (tmint) {
+        clearInterval(tmint)
+        tmint = null
+      }
+  })
+
+  wsclient.on(wsclient.$message, function (link, topic, message, opts) {
+    // message is Buffer
+    console.log('message got', JSON.stringify(topic), JSON.stringify(message), JSON.stringify(opts))
+    //wsclient.end()
+  })
+
+  wsclient.on('msg', function (message, opts) {  // in fact subscribe for external events
+    // message is Buffer
+    console.log('msg subscription message', JSON.stringify(message), JSON.stringify(opts))
+    //wsclient.end()
+  })
+
+  wsclient.on('presence', function (message, opts) {
+    // message is Buffer
+    console.log('presence subscription message', JSON.stringify(message), JSON.stringify(opts))
+    wsclient.emit('msg', '')
+    //wsclient.end()
+  })
+});
+
+//const client = itmp.connect('serial://COM3?baudRate=115200&dataBits=8&stopBits=1&parity=none~1', () => { return true })
+
 let cnt = 1
 function tm() {
+  if (!wsclient) return
   cnt++
-  server.publish('msg', [cnt])
-  console.log('publish msg')
+  wsclient.publish('msg', [cnt]).then((res) => {
+    console.log('published msg', cnt)
+  }).catch((res) => {
+    console.log('NOT published msg', cnt)
+  })
+  console.log('publish msg', cnt)
 }
-var tmint
 
 var state = new Map()
 function sr() {
   let that = state
-  server.call('com~46', 'get', []).then((data) => {
-    if (data[0] > 1000 || data[0] < 0) {
-      that.set('H', NaN)
-      that.set('T', NaN)
-      that.set('statecode', 200)
-      that.set('state', 'online')
-    } else {
-      that.set('H', data[0] / 10)
-      that.set('T', data[1] / 10)
-      that.set('statecode', 200)
-      that.set('state', 'online')
-      console.log(JSON.stringify([...that]))
-    }
-    return { H: that.get('H'), T: that.get('T') }
+  if (!wsclient) {
+    console.log('no client')
+    return
+  }
+  wsclient.call('get', ['get arg'], { opts: true }).then((data) => {
+    console.log('call result', data)
   }).catch((err) => {
-    that.set('statecode', err.code || 500)
-    that.set('state', 'offline')
     console.log('HT err', err)
   })
-
 }
 
 setInterval(sr, 5000)
 
-server.on(server.$connect, function (link) {
-  console.log('srv connect', link)
-  /*server.subscribe('presence', function (err) {
-    if (!err) {
-      server.publish('presence', 'Hello mqtt')
-    }
-  })*/
-})
-
-
-server.on(server.$disconnect, function (link) {
-  console.log('srv disconnect')
-  /*  server.subscribe('presence', function (err) {
-      if (!err) {
-        server.publish('presence', 'Hello mqtt')
-      }
-    })*/
-})
-
-server.on(server.$subscribe, (topic) => {
-  if (topic === 'msg')
-    if (!tmint)
-      tmint = setInterval(tm, 1000)
-})
-
-server.on(server.$unsubscribe, (topic) => {
-  if (topic === 'msg')
-    if (tmint) {
-      clearInterval(tmint)
-      tmint = null
-    }
-})
-
-server.on(server.$subscribe, function (topic, link) {
-  console.log('srv subscribe', link, topic)
-})
-server.on(server.$unsubscribe, function (topic, link) {
-  console.log('srv unsubscribe', link, topic)
-})
-
-server.on(server.$message, function (link, addr, topic, message) {
-  // message is Buffer
-  console.log('message got', topic, message.toString())
-  //server.end()
-})
-
-server.on('msg', function (message) {
-  // message is Buffer
-  console.log(message.toString())
-  //server.end()
-})
-
-server.on('presence', function (message) {
-  // message is Buffer
-  console.log(message.toString())
-  server.emit('msg', '')
-  //server.end()
-})
