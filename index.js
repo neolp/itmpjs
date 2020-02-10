@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 const EventEmitter = require('events')
 const UIDGenerator = require('uid-generator')
 const uidgen = new UIDGenerator() // Default is a 128-bit UID encoded in base58
@@ -71,15 +72,15 @@ class itmpClient extends EventEmitter {
     this.loginState = 0 // 0 - waiting for login
     this.nonce = uidgen.generateSync()
 
-    this.on('newListener', (eventName, listener) => { // when subscribe new listener (it is from 'events' interface)
+    this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         if (this.loginState > 1)
           this._subscribe(eventName).catch((err) => {
-            console.log('external subscribe error')
+            console.log('external subscribe error',err)
           })
       }
     })
-    this.on('removeListener', (eventName, listener) => { // when unsubscribe the listener (it is from 'events' interface)
+    this.on('removeListener', (eventName) => { // when unsubscribe the listener (it is from 'events' interface)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         if (this.loginState > 1)
           this._unsubscribe(eventName)
@@ -290,12 +291,12 @@ class itmpClient extends EventEmitter {
 
   processSubscribe(id, payload) {
     const [originaluri, opts] = payload
-    let uri
+    //let uri
     //    if (link.connected) {
     //console.log('linked subscribe', addr, ' for ', originaluri)
     //      uri = `area${link.connected.link}/${originaluri}`
     //    } else {
-    uri = originaluri
+    //uri = originaluri
     //    }
     //console.log('subscribe', addr, ' for ', uri)
 
@@ -320,7 +321,7 @@ class itmpClient extends EventEmitter {
 
       //}
     } else {
-      this.answer([5, id, 409, 'already subscribed'])
+      this.answer([5, id, 409, errors[409]])
     }
   }
   processUnsubscribe(id, payload) {
@@ -342,7 +343,7 @@ class itmpClient extends EventEmitter {
   }
 
   processDescribe(id, payload) {
-    const [uri, args, opts] = payload
+    const [uri,, opts] = payload
     let ret = this.model.describe(uri, opts)
     if (ret !== undefined) {
       this.answer([7, id, ret])
@@ -383,75 +384,75 @@ class itmpClient extends EventEmitter {
       let id;
       [id, ...payload] = payload
 
-      // if (this.loginState < 2 && command > 5) {// NOT connected
-      //   this.answer([5, id, 403, 'forbidden before login'])
-      //   return
-      // }
+      if (this.loginState < 2 && command > 5) {// NOT connected
+        this.answer([5, id, 403, 'forbidden before login'])
+        return
+      }
 
       switch (command) {
-        case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
-          this.processConnect(id, payload)
-          break
-        case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
-          this.processConnected(id, payload)
-          break
-        case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
-        case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
-        case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
-          this.processError(id, payload)
-          break
-        case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
-          this.processDescribe(id, payload)
-          break
-        case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
-          this.processResult(id, payload)
-          break
+      case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
+        this.processConnect(id, payload)
+        break
+      case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
+        this.processConnected(id, payload)
+        break
+      case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
+      case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
+      case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
+        this.processError(id, payload)
+        break
+      case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
+        this.processDescribe(id, payload)
+        break
+      case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
+        this.processResult(id, payload)
+        break
         // RPC -----------------------------
-        case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
-          this.processCall(id, payload)
-          break
-        case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
-          this.processResult(id, payload)
-          break
+      case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
+        this.processCall(id, payload)
+        break
+      case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
+        this.processResult(id, payload)
+        break
         // RPC Extended
-        case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
-          //  additional arguments for call
-          break
-        case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
-          //  call in progress
-          break
-        case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
-          // publish
-          break
+      case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
+        //  additional arguments for call
+        break
+      case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
+        //  call in progress
+        break
+      case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
+        // publish
+        break
         // events and sub/pub ---------------------
-        case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
-          this.processEvent(payload)
-          break
-        case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
-          this.processPublish(id, payload)
-          //console.log('publish', msg)
-          break
-        case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
-          //console.log('published', msg)
-          this.processResult(id, payload)
-          break
+      case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
+        this.processEvent(payload)
+        break
+      case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
+        this.processPublish(id, payload)
+        //console.log('publish', msg)
+        break
+      case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
+        //console.log('published', msg)
+        this.processResult(id, payload)
+        break
         // subscribe
-        case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
-          this.processSubscribe(id, payload)
-          break
-        case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
-          this.processSubscribed(id, payload)
-          break
-        case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
-          this.processUnsubscribe(id, payload)
-          break
-        case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
-          this.processUnsubscribed(id, payload)
-          break
+      case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
+        this.processSubscribe(id, payload)
+        break
+      case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
+        this.processSubscribed(id, payload)
+        break
+      case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
+        this.processUnsubscribe(id, payload)
+        break
+      case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
+        this.processUnsubscribed(id, payload)
+        break
         // keep alive
-        case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
-        case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
-        default:
+      case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
+      case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
+      default:
       }
     } else {
       console.log('wrong message ', msg)
@@ -572,9 +573,6 @@ please rewrite this
     // err(404, 'subscription not found')
   }
 */
-  queueSize() {
-    return link.queueSize()
-  }
 }
 
 itmpClient.prototype.$login = Symbol('login') // event fired when remote peer wants to login to us with connect parameters (event = {uri,opts,block:false})
