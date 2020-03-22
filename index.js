@@ -73,6 +73,7 @@ class itmpClient extends EventEmitter {
     this.nonce = uidgen.generateSync()
 
     this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
+      if (eventName===undefined) throw(new Error('wrong event name: undefined'))
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         if (this.loginState > 1)
           this._subscribe(eventName).catch((err) => {
@@ -168,9 +169,9 @@ class itmpClient extends EventEmitter {
   }
 
   processConnect(id, payload) { // remote end wants to login to us
-    let [realm, opts] = payload
-    if (opts === undefined || typeof opts !== 'object') opts = {}
-    let event = Object.assign({}, opts, { realm, block: false })
+    let [rrealm, ropts] = payload
+    if (ropts === undefined || typeof ropts !== 'object') ropts = {}
+    let event = Object.assign({}, ropts, { rrealm, name: this.link.name, block: false })
     this.emit(this.$login, event)
     if (event.block) {
       console.log('got connect BLOCK', JSON.stringify(event))
@@ -181,6 +182,7 @@ class itmpClient extends EventEmitter {
       console.log('got connect restore subscriptions')
       this.loginState = 2 // connected
       this.answer([1, id, this.realm, { uid: this.uid, nonce: this.nonce, name: this.name, token: this.token, var: npmpackegeversion }])
+      this.emit(this.$connected, event)
       this._resubscribe()
     }
   }
@@ -499,7 +501,11 @@ class itmpClient extends EventEmitter {
     const rets = []
     that.eventNames().forEach((topicName) => {
       if (typeof topicName === 'string' && topicName !== 'newListener' && topicName !== 'removeListener') {
-        rets.push(that.transaction([16, 0, topicName]).then(() => { console.log('resubscribed', topicName) }).catch(() => { console.log('failed resubscribed', topicName) }))
+        rets.push(that.transaction([16, 0, topicName]).then(() => {
+          console.log('resubscribed', topicName)
+        }).catch(() => {
+          console.log('failed resubscribed', topicName)
+        }))
       }
 
     })
