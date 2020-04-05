@@ -58,6 +58,7 @@ class itmpClient extends EventEmitter {
   constructor(link, opts = {}) {
     super()
     this.link = link // handle link
+    this.url = link.name
 
     this.msgid = 0 // msg number incremental for transction sequencing
     this.transactions = new Map() // handle unfinished transactions
