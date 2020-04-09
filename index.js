@@ -77,7 +77,7 @@ class itmpClient extends EventEmitter {
       if (eventName===undefined) throw(new Error('wrong event name: undefined'))
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         if (this.loginState > 1)
-          this._subscribe(eventName).catch((err) => {
+          this._subscribe(eventName,undefined,2000).catch((err) => {
             console.log('external subscribe error',err)
           })
       }
@@ -539,9 +539,9 @@ class itmpClient extends EventEmitter {
   // subscribe('topic')
   // subscribe('topic', {retain:'dead'} )
   // subscribe('topic', {retain:'dead'} )
-  _subscribe(topicName, params) {
+  _subscribe(topicName, params, timeout) {
     const msg = [16, 0, topicName, params]
-    return this.transaction(msg)
+    return this.transaction(msg, timeout)
   }
 
   // unsubscribe('topic')
