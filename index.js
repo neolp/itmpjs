@@ -264,13 +264,8 @@ class itmpClient extends EventEmitter {
     //   node.lastMessage = { topic: topicName, args, opts, link: this }
     //   node.onMessage(topicName, args, opts)
     // }
-    if (Array.isArray(args)) {
-      this.emit(this.$message, this, topicName, args, opts)
-      this.emit(topicName, ...args, opts)
-    } else {
       this.emit(this.$message, this, topicName, args, opts)
       this.emit(topicName, args, opts)
-    }
     //this.model.processIncomeEvent(link.connected ? `${link.connected.link}/${topic}` : `${addr}/${topic}`, args, ots)
   }
 
@@ -282,13 +277,8 @@ class itmpClient extends EventEmitter {
     //   node.lastMessage = { topic: topicName, args, opts, link: this }
     //   node.onMessage(topicName, args, opts)
     // }
-    if (Array.isArray(args)) {
-      this.emit(this.$message, this, topicName, args, opts)
-      this.emit(topicName, ...args, opts)
-    } else {
       this.emit(this.$message, this, topicName, args, opts)
       this.emit(topicName, args, opts)
-    }
     this.answer([15, id])
   }
 
