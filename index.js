@@ -173,7 +173,7 @@ class itmpClient extends EventEmitter {
   processConnect(id, payload) { // remote end wants to login to us
     let [rrealm, ropts] = payload
     if (ropts === undefined || typeof ropts !== 'object') ropts = {}
-    let event = Object.assign({}, ropts, { rrealm, name: this.name, block: false })
+    let event = Object.assign({}, ropts, { rrealm, block: false })
     this.emit(this.$login, event)
     if (event.block) {
       console.log('got connect BLOCK', JSON.stringify(event))
