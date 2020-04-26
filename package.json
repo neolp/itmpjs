@@ -1,6 +1,6 @@
 {
   "name": "itmp",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "itmp js implementation",
   "main": "index.js",
   "scripts": {

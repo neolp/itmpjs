@@ -69,16 +69,17 @@ class itmpClient extends EventEmitter {
     this.role = opts.role ? opts.role : 'client' // role determine who send first message for login client send first message, server wait for message, node connects without login
     this.realm = opts.realm ? opts.realm : 'itmp client' // realm describes what is it, it can de user, robot, proxy, .... - main function
     this.token = opts.token ? opts.token : ''
+    this.name = opts.name ? opts.name : ''
     this.uid = opts.uid ? opts.uid : uidgen.generateSync()
     this.loginState = 0 // 0 - waiting for login
     this.nonce = uidgen.generateSync()
 
     this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
-      if (eventName===undefined) throw(new Error('wrong event name: undefined'))
+      if (eventName === undefined) throw (new Error('wrong event name: undefined'))
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
         if (this.loginState > 1)
-          this._subscribe(eventName,undefined,2000).catch((err) => {
-            console.log('external subscribe error',err)
+          this._subscribe(eventName, undefined, 2000).catch((err) => {
+            console.log('external subscribe error', err)
           })
       }
     })
@@ -91,7 +92,7 @@ class itmpClient extends EventEmitter {
 
     link.on('connect', () => { // then link connected (become active) send initial CONNECT message and then got answer make link connected
       if (this.role === 'client') { // we need to login // send authentification data
-        this.transaction([0, 0, this.realm, { uid: this.uid, name: link.name, nonce: this.nonce, token: this.token, var: npmpackegeversion }], 3000).then(([rrealm, ropts]) => {
+        this.transaction([0, 0, this.realm, { uid: this.uid, name: this.name, nonce: this.nonce, token: this.token, var: npmpackegeversion }], 3000).then(([rrealm, ropts]) => {
           if (ropts === undefined || typeof ropts !== 'object') ropts = {}
           let event = Object.assign({}, ropts, { rrealm, name: link.name, block: false })
           this.emit(this.$loggedin, event)
@@ -172,7 +173,7 @@ class itmpClient extends EventEmitter {
   processConnect(id, payload) { // remote end wants to login to us
     let [rrealm, ropts] = payload
     if (ropts === undefined || typeof ropts !== 'object') ropts = {}
-    let event = Object.assign({}, ropts, { rrealm, name: this.link.name, block: false })
+    let event = Object.assign({}, ropts, { rrealm, name: this.name, block: false })
     this.emit(this.$login, event)
     if (event.block) {
       console.log('got connect BLOCK', JSON.stringify(event))
@@ -264,8 +265,8 @@ class itmpClient extends EventEmitter {
     //   node.lastMessage = { topic: topicName, args, opts, link: this }
     //   node.onMessage(topicName, args, opts)
     // }
-      this.emit(this.$message, this, topicName, args, opts)
-      this.emit(topicName, args, opts)
+    this.emit(this.$message, this, topicName, args, opts)
+    this.emit(topicName, args, opts)
     //this.model.processIncomeEvent(link.connected ? `${link.connected.link}/${topic}` : `${addr}/${topic}`, args, ots)
   }
 
@@ -277,8 +278,8 @@ class itmpClient extends EventEmitter {
     //   node.lastMessage = { topic: topicName, args, opts, link: this }
     //   node.onMessage(topicName, args, opts)
     // }
-      this.emit(this.$message, this, topicName, args, opts)
-      this.emit(topicName, args, opts)
+    this.emit(this.$message, this, topicName, args, opts)
+    this.emit(topicName, args, opts)
     this.answer([15, id])
   }
 
@@ -336,7 +337,7 @@ class itmpClient extends EventEmitter {
   }
 
   processDescribe(id, payload) {
-    const [uri,, opts] = payload
+    const [uri, , opts] = payload
     let ret = this.model.describe(uri, opts)
     if (ret !== undefined) {
       this.answer([7, id, ret])
@@ -383,69 +384,69 @@ class itmpClient extends EventEmitter {
       }
 
       switch (command) {
-      case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
-        this.processConnect(id, payload)
-        break
-      case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
-        this.processConnected(id, payload)
-        break
-      case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
-      case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
-      case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
-        this.processError(id, payload)
-        break
-      case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
-        this.processDescribe(id, payload)
-        break
-      case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
-        this.processResult(id, payload)
-        break
+        case 0: // [CONNECT, Connection:id, Realm:uri, Details:dict] open connection
+          this.processConnect(id, payload)
+          break
+        case 1: // [CONNECTED, CONNECT.Connection:id, Session:id, Details:dict] confirm connection
+          this.processConnected(id, payload)
+          break
+        case 2: // [ABORT, Code:integer, Reason:string, Details:dict] terminate connection
+        case 4: // [DISCONNECT, Code:integer, Reason:string, Details:dict] clear finish connection
+        case 5: // [ERROR, Request:id, Code:integer, Reason:string, Details:dict] error notificarion
+          this.processError(id, payload)
+          break
+        case 6: // [DESCRIBE, Request:id, Topic:uri, Options:dict] get description
+          this.processDescribe(id, payload)
+          break
+        case 7: // [DESCRIPTION, DESCRIBE.Request:id, description:list, Options:dict] response
+          this.processResult(id, payload)
+          break
         // RPC -----------------------------
-      case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
-        this.processCall(id, payload)
-        break
-      case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
-        this.processResult(id, payload)
-        break
+        case 8: // [CALL, Request:id, Procedure:uri, Arguments, Options:dict] call
+          this.processCall(id, payload)
+          break
+        case 9: // [RESULT, CALL.Request:id, Result, Details:dict] call response
+          this.processResult(id, payload)
+          break
         // RPC Extended
-      case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
-        //  additional arguments for call
-        break
-      case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
-        //  call in progress
-        break
-      case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
-        // publish
-        break
+        case 10: // [ARGUMENTS, CALL.Request:id,ARGUMENTS.Sequuence:integer,Arguments,Options:dict]
+          //  additional arguments for call
+          break
+        case 11: // [PROGRESS, CALL.Request:id, PROGRESS.Sequuence:integer, Result, Details:dict]
+          //  call in progress
+          break
+        case 12: // [CANCEL, CALL.Request:id, Details:dict] call cancel
+          // publish
+          break
         // events and sub/pub ---------------------
-      case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
-        this.processEvent(payload)
-        break
-      case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
-        this.processPublish(id, payload)
-        //console.log('publish', msg)
-        break
-      case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
-        //console.log('published', msg)
-        this.processResult(id, payload)
-        break
+        case 13: // [EVENT, Request:id, Topic:uri, Arguments, Options:dict] event
+          this.processEvent(payload)
+          break
+        case 14: // [PUBLISH, Request:id, Topic:uri, Arguments, Options:dict] event with acknowledge
+          this.processPublish(id, payload)
+          //console.log('publish', msg)
+          break
+        case 15: // [PUBLISHED, PUBLISH.Request:id, Publication:id, Options:dict] event acknowledged
+          //console.log('published', msg)
+          this.processResult(id, payload)
+          break
         // subscribe
-      case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
-        this.processSubscribe(id, payload)
-        break
-      case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
-        this.processSubscribed(id, payload)
-        break
-      case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
-        this.processUnsubscribe(id, payload)
-        break
-      case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
-        this.processUnsubscribed(id, payload)
-        break
+        case 16: // [SUBSCRIBE, Request:id, Topic:uri, Options:dict] subscribe
+          this.processSubscribe(id, payload)
+          break
+        case 17: // [SUBSCRIBED, SUBSCRIBE.Request:id, Options:dict] subscription confirmed
+          this.processSubscribed(id, payload)
+          break
+        case 18: // [UNSUBSCRIBE, Request:id, Topic:uri, Options:dict]
+          this.processUnsubscribe(id, payload)
+          break
+        case 19: // [UNSUBSCRIBED, UNSUBSCRIBE.Request:id, Options:dict]
+          this.processUnsubscribed(id, payload)
+          break
         // keep alive
-      case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
-      case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
-      default:
+        case 33: // [KEEP_ALIVE, Request:id, Options:dict] keep alive request
+        case 34: // [KEEP_ALIVE_RESP, KEEP_ALIVE.Request:id, Options:dict] keep alive responce
+        default:
       }
     } else {
       console.log('wrong message ', msg)
@@ -591,7 +592,7 @@ itmpClient.prototype.$error = Symbol('error')  //  event fired when client error
 // itmp:com~8
 
 
-function connection(url, opts) {
+function connect(url, opts) {
   if (url.startsWith('itmp://')) url = url.substring(7)
   else if (url.startsWith('itmp:')) url = url.substring(5)
   else if (url.startsWith('itmp.')) url = url.substring(5)
@@ -631,4 +632,4 @@ function createServer(url, opts, callback) {
   return undefined
 }
 
-module.exports = { createServer: createServer, connect: connection }
+module.exports = { createServer: createServer, connect: connect }
