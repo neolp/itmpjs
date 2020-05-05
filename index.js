@@ -515,9 +515,10 @@ class itmpClient extends EventEmitter {
   }
 
   // sendEvent('reset',[12,45])
-  sendEvent(topic, msg) {
+  sendEvent(topic, message, opts) {
     const id = this.msgid++
-    return this.link.send([13, id, topic, msg])
+    if (opts) return this.link.send([13, id, topic, message, opts])
+    return this.link.send([13, id, topic, message])
   }
 
   // call('reset')
