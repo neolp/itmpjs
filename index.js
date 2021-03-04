@@ -1,7 +1,5 @@
 /* eslint-disable no-console */
 const EventEmitter = require('events')
-const UIDGenerator = require('uid-generator')
-const uidgen = new UIDGenerator() // Default is a 128-bit UID encoded in base58
 const npmpackegeversion = require('./package.json').version
 
 const defaultConnectOptions = {
@@ -72,7 +70,7 @@ class itmpClient extends EventEmitter {
     this.name = opts.name ? opts.name : ''
     this.uid = opts.uid ? opts.uid : uidgen.generateSync()
     this.loginState = 0 // 0 - waiting for login
-    this.nonce = uidgen.generateSync()
+    this.nonce = Math.random().toString(36).substring(7);
 
     this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
       if (eventName === undefined) throw (new Error('wrong event name: undefined'))
