@@ -62,6 +62,8 @@ class itmpClient extends EventEmitter {
     this.transactions = new Map() // handle unfinished transactions
     this.remotesubscriptions = new Map()
 
+    this.callhandlers = new Map()
+
     this.resubscribe = opts.resubscribe !== undefined ? opts.resubscribe : true
 
     this.role = opts.role ? opts.role : 'client' // role determine who send first message for login client send first message, server wait for message, node connects without login
@@ -136,6 +138,15 @@ class itmpClient extends EventEmitter {
     })
   }
 
+  oncall(topic, func, desc) {
+    if (this.callhandlers.has(topic)) throw (new Error('call handler for existing call'))
+    if (func.constructor.name !== 'AsyncFunction') throw (new Error('call handler must be async function'))
+    this.callhandlers.set(topic, { topic, func, desc })
+  }
+  offcall(topic) {
+    if (!this.callhandlers.has(topic)) throw (new Error('call handler not exist'))
+    this.callhandlers.delete(topic)
+  }
   setGeneralCall(call) {
     this.gencall = call
   }
@@ -217,7 +228,21 @@ class itmpClient extends EventEmitter {
 
   processCall(id, payload) {
     const [uri, args, opts] = payload
-    if (this.gencall) {
+
+    if (this.callhandlers.has(uri)) {
+      let record = this.callhandlers.get(uri)
+      record.func(uri, args, opts).
+        then((ret) => {
+          this.answer([9, id, ret])
+        }).
+        catch((err) => {
+          if (err.code) {
+            this.answer([5, id, err.code, err.message])
+          } else {
+            this.answer([5, id, 500, 'internal error'])
+          }
+        })
+    } else if (this.gencall) {
       this.gencall(uri, args, opts).
         then((ret) => {
           this.answer([9, id, ret])

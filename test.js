@@ -23,6 +23,12 @@ client.setGeneralCall(async (name, args, pars) => {
 }
 )
 
+client.oncall('get', async (name, args, opts) => {
+  console.log('msg called with args', JSON.stringify(args), JSON.stringify(opts))
+  return 'ok msgg2'
+})
+
+
 client.on(client.$subscribe, (topic) => {
   console.log('subscribe', topic)
   if (topic === 'msg')
