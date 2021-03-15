@@ -70,9 +70,9 @@ class itmpClient extends EventEmitter {
     this.realm = opts.realm ? opts.realm : 'itmp client' // realm describes what is it, it can de user, robot, proxy, .... - main function
     this.token = opts.token ? opts.token : ''
     this.name = opts.name ? opts.name : ''
-    this.uid = opts.uid ? opts.uid : uidgen.generateSync()
+    this.uid = opts.uid ? opts.uid : Math.random().toString(36).substring(7)
     this.loginState = 0 // 0 - waiting for login
-    this.nonce = Math.random().toString(36).substring(7);
+    this.nonce = Math.random().toString(36).substring(7)
 
     this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
       if (eventName === undefined) throw (new Error('wrong event name: undefined'))
