@@ -137,16 +137,29 @@ class itmpClient extends EventEmitter {
       this.process(msg)
     })
   }
-
+/**
+ * Set call handler for given topic
+ * @param {string} topic call name
+ * @param {Function} func async function than handle request with given topic
+ * @param {string} desc description returned with desc request
+ */
   oncall(topic, func, desc) {
     if (this.callhandlers.has(topic)) throw (new Error('call handler for existing call'))
     if (func.constructor.name !== 'AsyncFunction') throw (new Error('call handler must be async function'))
     this.callhandlers.set(topic, { topic, func, desc })
   }
+  /**
+   * Remove call handler
+   * @param {string} topic 
+   */
   offcall(topic) {
     if (!this.callhandlers.has(topic)) throw (new Error('call handler not exist'))
     this.callhandlers.delete(topic)
   }
+  /**
+   * set call handler for all unknown topcs (except known with onclall() method)
+   * @param {function} call
+   */
   setGeneralCall(call) {
     this.gencall = call
   }
@@ -546,9 +559,9 @@ class itmpClient extends EventEmitter {
 
   // call('reset')
   // call('setspeed',[12,45])
-  call(name, args, opts) {
+  call(name, args, opts, timeout) {
     if (opts) return this.transaction([8, 0, name, args, opts])
-    return this.transaction([8, 0, name, args])
+    return this.transaction([8, 0, name, args], timeout)
   }
 
   // subscribe('topic')
