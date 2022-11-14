@@ -580,9 +580,9 @@ class itmpClient extends EventEmitter {
 
   // describe('topic')
   // describe('address', 'topic')
-  describe(topic) {
+  describe(topic, timeout = 600) {
     const msg = [6, 0, topic]
-    return this.transaction(msg)
+    return this.transaction(msg,timeout)
   }
 
   /*
