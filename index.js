@@ -119,6 +119,7 @@ class itmpClient extends EventEmitter {
         // do nothing but no one can send message until login
       } else { //allow connection without login
         this.loginState = 3 // connected without login
+        this.emit(this.$connected)
       }
     })
     link.on('disconnect', () => { // then link disconnected unsubscribe all topics from thet link
@@ -135,6 +136,9 @@ class itmpClient extends EventEmitter {
     link.on('message', (msg) => {
       //      console.log('income message',JSON.stringify(msg))
       this.process(msg)
+    })
+    link.on('rawmessage', (msg) => {
+      this.emit(this.$raw, msg)
     })
   }
 /**
@@ -407,13 +411,9 @@ class itmpClient extends EventEmitter {
   }
 
   process(msg) {
-    //      addr = link.linkname
-    //      addr = `${link.linkname}#${addr}`
+    //      addr = `${link.linkname}~${addr}`
     if (Array.isArray(msg) && msg.length >= 1 && typeof msg[0] === 'number') {
-      let [command, ...payload] = msg
-      let id;
-      [id, ...payload] = payload
-
+      let [command, id, ...payload] = msg
       if (this.loginState < 2 && command > 5) {// NOT connected
         this.answer([5, id, 403, 'forbidden before login'])
         return
@@ -618,6 +618,7 @@ itmpClient.prototype.$subscribe = Symbol('subscribe') //  event fired when clien
 itmpClient.prototype.$unsubscribe = Symbol('unsubscribe') //  event fired when client unsubscribe for topic
 itmpClient.prototype.$message = Symbol('message')  //  event fired when client send an event
 itmpClient.prototype.$error = Symbol('error')  //  event fired when client error
+itmpClient.prototype.$raw = Symbol('raw')  //  raw message
 
 
 // urls
