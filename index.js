@@ -378,7 +378,7 @@ class itmpClient extends EventEmitter {
 
   processDescribe(id, payload) {
     const [uri, , opts] = payload
-    let ret = this.model.describe(uri, opts)
+    let ret = this.model ? this.model.describe(uri, opts) : undefined
     if (ret !== undefined) {
       this.answer([7, id, ret])
     } else {
