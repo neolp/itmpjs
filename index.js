@@ -74,9 +74,11 @@ class itmpClient extends EventEmitter {
     this.loginState = 0 // 0 - waiting for login
     this.nonce = Math.random().toString(36).substring(7)
 
+    this.subscribed = new Set() // set of topics
+
     this.on('newListener', (eventName) => { // when subscribe new listener (it is from 'events' interface)
       if (eventName === undefined) throw (new Error('wrong event name: undefined'))
-      if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
+      if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0 && !this.subscribed.has(eventName)) {
         if (this.loginState > 1)
           this._subscribe(eventName, undefined, 2000).catch((err) => {
             console.log('external subscribe error', err)
@@ -84,7 +86,7 @@ class itmpClient extends EventEmitter {
       }
     })
     this.on('removeListener', (eventName) => { // when unsubscribe the listener (it is from 'events' interface)
-      if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0) {
+      if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0 && !this.subscribed.has(eventName)) {
         if (this.loginState > 1)
           this._unsubscribe(eventName)
       }
@@ -102,7 +104,7 @@ class itmpClient extends EventEmitter {
             this.loginState = 0 // NOT connected
             this.emit(this.$disconnected, link.name)
           } else {
-            console.log('got connect restore subscriptions')
+            // console.log('got connect restore subscriptions')
             this.loginState = 2 // connected
             this.emit(this.$connected, event)
             this._resubscribe()
@@ -114,8 +116,9 @@ class itmpClient extends EventEmitter {
           this.emit(this.$disconnected, link.name)
         })
       } else if (this.role === 'server') {
-        console.log('server connect')
-        this.loginState = 1 // Semi connected
+        // console.log('server connect SEMI',this.loginState)
+        if (this.loginState<1)
+          this.loginState = 1 // Semi connected
         // do nothing but no one can send message until login
       } else { //allow connection without login
         this.loginState = 3 // connected without login
@@ -141,6 +144,28 @@ class itmpClient extends EventEmitter {
       this.emit(this.$raw, msg)
     })
   }
+  subscribe(eventName, listener){
+      if (eventName === undefined) throw (new Error('wrong event name: undefined'))
+      let ret = Promise.resolve()
+      if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0 && !this.subscribed.has(eventName)) {
+        if (this.loginState > 1) {
+          this.subscribed.add(eventName)
+          ret = this._subscribe(eventName, undefined, 2000)
+        }
+      }
+      this.addListener(eventName, listener)
+      return ret
+    }
+    unsubscribe(eventName, listener) { // when unsubscribe the listener (it is from 'events' interface)
+      this.removeListener(eventName, listener)
+      if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0 && this.subscribed.has(eventName)) {
+        if (this.loginState > 1) {
+          this.subscribed.delete(eventName)
+          return this._unsubscribe(eventName)
+        }
+      }
+      return Promise.resolve()
+    }
 /**
  * Set call handler for given topic
  * @param {string} topic call name
@@ -166,6 +191,13 @@ class itmpClient extends EventEmitter {
    */
   setGeneralCall(call) {
     this.gencall = call
+  }
+  /**
+   * set describe handler for all unknown topcs (except known with onclall() method)
+   * @param {function} desc
+   */
+  setGeneralDescribe(desc) {
+    this.gendescribe = desc
   }
 
   stop() {
@@ -207,7 +239,7 @@ class itmpClient extends EventEmitter {
       this.loginState = 0 // NOT connected
       this.close()
     } else {
-      console.log('got connect restore subscriptions')
+      // console.log('got connect restore subscriptions')
       this.loginState = 2 // connected
       this.answer([1, id, this.realm, { uid: this.uid, nonce: this.nonce, name: this.name, token: this.token, var: npmpackegeversion }])
       this.emit(this.$connected, event)
@@ -378,12 +410,21 @@ class itmpClient extends EventEmitter {
 
   processDescribe(id, payload) {
     const [uri, , opts] = payload
-    let ret = this.model ? this.model.describe(uri, opts) : undefined
-    if (ret !== undefined) {
-      this.answer([7, id, ret])
+    if (this.callhandlers.has(uri)) {
+      let record = this.callhandlers.get(uri)
+      this.answer([9, id, record.desc])
+    } else if (this.gendescribe) {
+      this.gendescribe(uri,opts).then((ret) => {
+        this.answer([9, id, ret])
+      }).catch((err) => {
+        if (err.code) {
+          this.answer([5, id, err.code, err.message])
+        } else {
+          this.answer([5, id, 500, 'internal error'])
+        }
+      })
     } else {
-      console.log(`unexpected descr${JSON.stringify(payload)}`)
-      this.answer([5, id, 404, 'no such uri'])
+      this.answer([5, id, 404, 'no such call'])
     }
   }
 
@@ -631,6 +672,11 @@ itmpClient.prototype.$raw = Symbol('raw')  //  raw message
 
 
 function connect(url, opts) {
+  if (opts.link) {
+    let con = new itmpClient(link, opts)
+    link.connect()
+    return con
+  }
   if (url.startsWith('itmp://')) url = url.substring(7)
   else if (url.startsWith('itmp:')) url = url.substring(5)
   else if (url.startsWith('itmp.')) url = url.substring(5)
