@@ -144,24 +144,24 @@ class itmpClient extends EventEmitter {
       this.emit(this.$raw, msg)
     })
   }
-  subscribe(eventName, listener){
+  subscribe(eventName, listener, timeout = 2000){
       if (eventName === undefined) throw (new Error('wrong event name: undefined'))
       let ret = Promise.resolve()
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0 && !this.subscribed.has(eventName)) {
         if (this.loginState > 1) {
           this.subscribed.add(eventName)
-          ret = this._subscribe(eventName, undefined, 2000)
+          ret = this._subscribe(eventName, undefined, timeout)
         }
       }
       this.addListener(eventName, listener)
       return ret
     }
-    unsubscribe(eventName, listener) { // when unsubscribe the listener (it is from 'events' interface)
+    unsubscribe(eventName, listener, timeout = 2000) { // when unsubscribe the listener (it is from 'events' interface)
       this.removeListener(eventName, listener)
       if (typeof eventName === 'string' && eventName !== 'newListener' && eventName !== 'removeListener' && this.listenerCount(eventName) === 0 && this.subscribed.has(eventName)) {
         if (this.loginState > 1) {
           this.subscribed.delete(eventName)
-          return this._unsubscribe(eventName)
+          return this._unsubscribe(eventName, undefined, timeout)
         }
       }
       return Promise.resolve()
@@ -609,14 +609,18 @@ class itmpClient extends EventEmitter {
   // subscribe('topic', {retain:'dead'} )
   // subscribe('topic', {retain:'dead'} )
   _subscribe(topicName, params, timeout) {
-    const msg = [16, 0, topicName, params]
-    return this.transaction(msg, timeout)
+    if (params) return this.transaction([16, 0, topicName, params], timeout)
+    else return this.transaction([16, 0, topicName], timeout)
+//    const msg = [16, 0, topicName, params]
+//    return this.transaction(msg, timeout)
   }
 
   // unsubscribe('topic')
-  _unsubscribe(topicName) {
-    const msg = [18, 0, topicName]
-    return this.transaction(msg)
+  _unsubscribe(topicName, params, timeout) {
+    if (params) return this.transaction([18, 0, topicName, params], timeout)
+    else return this.transaction([18, 0, topicName], timeout)
+    //const msg = [18, 0, topicName]
+    //return this.transaction(msg)
   }
 
   // describe('topic')
@@ -672,7 +676,7 @@ itmpClient.prototype.$raw = Symbol('raw')  //  raw message
 
 
 function connect(url, opts) {
-  if (opts.link) {
+  if (opts && opts.link) {
     let con = new itmpClient(link, opts)
     link.connect()
     return con
